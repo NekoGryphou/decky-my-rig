@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The app restores this project for win-x64; declaring it keeps one lock
+         file valid for both the app and the test restores. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/MyRigConfig.App/Features/Rename/RenameDialogViewModel.cs" Link="ViewModels/RenameDialogViewModel.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Rename/RenameMessages.cs" Link="ViewModels/RenameMessages.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/ManagedDeviceSummary.cs" Link="ViewModels/ManagedDeviceSummary.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostPageConstants.cs" Link="ViewModels/HostPageConstants.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostViewModel.cs" Link="ViewModels/HostViewModel.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostViewModel.Settings.cs" Link="ViewModels/HostViewModel.Settings.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostMessages.cs" Link="ViewModels/HostMessages.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostTypes.cs" Link="ViewModels/HostTypes.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostHelpers.cs" Link="ViewModels/HostHelpers.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Shared/SharedTypes.cs" Link="Shared/SharedTypes.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Shared/SharedMessages.cs" Link="Shared/SharedMessages.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingViewModel.cs" Link="ViewModels/PairingViewModel.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingMessages.cs" Link="ViewModels/PairingMessages.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingConstants.cs" Link="ViewModels/PairingConstants.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingTypes.cs" Link="ViewModels/PairingTypes.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Port/PortDialogViewModel.cs" Link="ViewModels/PortDialogViewModel.cs" />
+    <Compile Include="../../src/MyRigConfig.App/Features/Port/PortMessages.cs" Link="ViewModels/PortMessages.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MyRigConfig.Core/MyRigConfig.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+    <None Include="../../../../tests/fixtures/local-control/*.json" Link="Fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

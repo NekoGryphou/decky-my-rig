@@ -1,0 +1,26 @@
+# ? Dependency check for the fuzz targets (tools/check_linux.sh). It's a separate
+#   file because their dependency graph differs from the workspace's (deny.toml).
+[graph]
+all-features = true
+
+[advisories]
+ignore = [
+    # ? opaque-ke pulls in elliptic-curve, but the suite is Ristretto255
+    #   (curve25519-dalek), so crypto-bigint's affected arithmetic is never used.
+    { id = "RUSTSEC-2026-0387", reason = "Ristretto255 suite; crypto-bigint arithmetic unused" },
+]
+
+[licenses]
+allow = ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT", "Unicode-3.0"]
+private = { ignore = true }
+# ! libFuzzer (LLVM), linked only into the fuzz targets, never into a release.
+exceptions = [{ crate = "libfuzzer-sys", allow = ["NCSA"] }]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

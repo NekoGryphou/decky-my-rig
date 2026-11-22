@@ -1,0 +1,18 @@
+[package]
+name = "myrig-setup"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+myrig-host-core.workspace = true
+socket2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+myrig-host-windows.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

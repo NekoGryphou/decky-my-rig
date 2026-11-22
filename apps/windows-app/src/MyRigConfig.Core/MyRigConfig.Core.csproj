@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The app restores this project for win-x64 and win-arm64; declaring them keeps one lock
+         file valid for both the app and the test restores. -->
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
+    <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />
+    <InternalsVisibleTo Include="MyRigConfig" />
+    <InternalsVisibleTo Include="MyRigConfig.Tests" />
+  </ItemGroup>
+</Project>

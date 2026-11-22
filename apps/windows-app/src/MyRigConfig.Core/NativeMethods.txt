@@ -1,0 +1,12 @@
+OpenSCManagerW
+OpenServiceW
+CloseServiceHandle
+QueryServiceStatusEx
+GetNamedPipeServerProcessId
+WaitNamedPipeW
+CreateFileW
+GetExtendedTcpTable
+GetSecurityInfo
+LocalFree
+FILE_ACCESS_RIGHTS
+WIN32_ERROR

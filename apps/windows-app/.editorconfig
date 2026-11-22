@@ -1,0 +1,17 @@
+# * Analyzer policy. Every disabled rule says why it clashes with the project's
+#   rules; everything else stays a build error.
+
+[*.cs]
+# ? Files hold one role each, so a types file groups several types (PairingTypes.cs).
+dotnet_diagnostic.MA0048.severity = none
+
+[src/MyRigConfig.App/**.cs]
+# ! UI code must resume on the UI thread; Core uses ConfigureAwait(false).
+dotnet_diagnostic.MA0004.severity = none
+
+[tests/**.cs]
+# ? Ordinal string assertions in tests: comparers add noise, not safety.
+dotnet_diagnostic.MA0002.severity = none
+dotnet_diagnostic.MA0006.severity = none
+# ? MSTest runs test methods on the thread pool; there is no context to keep.
+dotnet_diagnostic.MA0004.severity = none

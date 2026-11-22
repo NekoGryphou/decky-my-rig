@@ -1,0 +1,15 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SHA-256 of a public synthetic test token in old test history"
+regexes = ['''630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd''']
+
+[[allowlists]]
+description = "The plugin build's credential check is tested with fake credential URLs"
+regexTarget = "match"
+regexes = ['''(?i)https?://user:secret@(example\.com|host)''']
+
+[[allowlists]]
+description = "SHA-256 of 32 bytes of 0x01, the fuzz fixture's public synthetic token"
+regexes = ['''72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793''']

@@ -1,0 +1,16 @@
+[package]
+name = "myrig-client-linux"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+libc.workspace = true
+myrig-client.workspace = true
+
+[dev-dependencies]
+myrig-client = { workspace = true, features = ["testing"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

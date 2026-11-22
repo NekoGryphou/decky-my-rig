@@ -1,0 +1,19 @@
+[package]
+name = "myrig-notifier"
+version.workspace = true
+publish = false
+edition = "2024"
+
+[dependencies]
+myrig-protocol.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+# ? Windows only: otherwise notify-rust's Linux backend (zbus) would get built.
+[target.'cfg(windows)'.dependencies]
+auto-launch.workspace = true
+myrig-host-windows.workspace = true
+notify-rust.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,4 @@
+[toolchain]
+# ? cargo-fuzz needs nightly for its sanitizer flags.
+channel = "nightly-2026-11-01"
+profile = "minimal"

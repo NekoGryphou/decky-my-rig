@@ -1,0 +1,101 @@
+{
+ "valid": [
+  "Steam Deck",
+  "Salon \u2013 Steam Deck \ud83c\udfae",
+  "\u2764\ufe0f PC",
+  "Gaming PC 2",
+  "\u00dcn\u00efc\u00f8d\u00e9",
+  "\u65e5\u672c\u306ePC",
+  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ ],
+ "invalid": [
+  {
+   "why": "empty",
+   "name": ""
+  },
+  {
+   "why": "leading space",
+   "name": " PC"
+  },
+  {
+   "why": "trailing space",
+   "name": "PC "
+  },
+  {
+   "why": "81 characters",
+   "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "why": "NUL",
+   "name": "a\u0000b"
+  },
+  {
+   "why": "line feed",
+   "name": "a\nb"
+  },
+  {
+   "why": "soft hyphen",
+   "name": "a\u00adb"
+  },
+  {
+   "why": "zero width space",
+   "name": "a\u200bb"
+  },
+  {
+   "why": "zero width joiner",
+   "name": "a\u200db"
+  },
+  {
+   "why": "right-to-left override",
+   "name": "a\u202eb"
+  },
+  {
+   "why": "isolate",
+   "name": "a\u2066b"
+  },
+  {
+   "why": "byte order mark",
+   "name": "a\ufeffb"
+  },
+  {
+   "why": "Arabic number sign",
+   "name": "a\u0600b"
+  },
+  {
+   "why": "Arabic end of ayah",
+   "name": "a\u06ddb"
+  },
+  {
+   "why": "interlinear annotation",
+   "name": "a\ufff9b"
+  },
+  {
+   "why": "tag characters",
+   "name": "flag \ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc65\udb40\udc6e\udb40\udc67\udb40\udc7f"
+  },
+  {
+   "why": "Kaithi number sign",
+   "name": "a\ud804\udcbdb"
+  },
+  {
+   "why": "Hangul choseong filler",
+   "name": "a\u115fb"
+  },
+  {
+   "why": "Hangul filler",
+   "name": "a\u3164b"
+  },
+  {
+   "why": "halfwidth Hangul filler",
+   "name": "a\uffa0b"
+  },
+  {
+   "why": "line separator",
+   "name": "a\u2028b"
+  },
+  {
+   "why": "Mongolian vowel separator",
+   "name": "a\u180eb"
+  }
+ ]
+}

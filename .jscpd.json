@@ -1,0 +1,8 @@
+{
+  "minLines": 6,
+  "minTokens": 60,
+  "threshold": 1,
+  "reporters": ["console"],
+  "silent": true,
+  "ignore": ["**/node_modules/**", "**/out/**", "**/bin/**", "**/obj/**", "**/*.json", "**/*.lock"]
+}

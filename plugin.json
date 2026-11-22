@@ -1,0 +1,11 @@
+{
+  "name": "Decky My Rig",
+  "author": "Gryphou",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "network"],
+    "description": "Wake and stop your Windows PCs from Game Mode.",
+    "image": "https://raw.githubusercontent.com/NekoGryphou/decky-my-rig/main/assets/panel.png"
+  }
+}

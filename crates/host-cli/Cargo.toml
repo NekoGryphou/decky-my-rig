@@ -1,0 +1,19 @@
+[package]
+name = "myrig-host"
+version.workspace = true
+publish = false
+edition = "2024"
+
+[dependencies]
+myrig-protocol.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+myrig-host-windows.workspace = true
+
+[lints]
+workspace = true

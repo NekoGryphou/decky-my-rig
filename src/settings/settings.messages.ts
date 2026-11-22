@@ -1,0 +1,30 @@
+export const SETTINGS_ERROR = "Could not update PC settings. Please try again.";
+export const MAC_ERROR =
+  "MAC detection failed. Enter the MAC address manually.";
+export const PC_MISSING = "PC was not found.";
+export const DELETE_WARNING = "The PC also forgets this device.";
+export const notUnpaired = (name: string) =>
+  `${name} was unreachable. Remove this device in My Rig on Windows.`;
+export const PAIR = "Pair";
+export const PAIRING_CODE_TITLE = "Pairing code";
+export const PAIRING_CODE_HELP = "Enter the 8-digit code shown on your PC.";
+export const TITLE_EDIT = "Edit PC";
+export const TITLE_PAIR = "Pair with your PC";
+export const FORM_CONNECTION = "Host connection";
+export const PAIR_AGAIN = "Pair again";
+export const DELETE_PC = "Delete PC";
+export const PC_NAME = "PC name";
+export const MAC_ADDRESS = "MAC address";
+export const DETECT = "Detect";
+export const IP_ADDRESS = "IP address";
+export const PORT = "Port";
+export const NEXT = "Next";
+export const SAVE = "Save";
+export const SAVE_PC = "Save PC";
+export const EDIT = "Edit";
+export const LOADING = "Loading…";
+export const deleteLabel = (name: string) => `Delete ${name}`;
+export const editLabel = (name: string) => `Edit ${name}`;
+export const DELETE = "Delete";
+export const KEEP_PC = "Keep PC";
+export const deleteTitle = (name: string) => `Delete ${name}?`;

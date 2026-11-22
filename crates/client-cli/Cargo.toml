@@ -1,0 +1,21 @@
+[package]
+name = "myrig-cli"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "myrig"
+path = "src/main.rs"
+
+[dependencies]
+myrig-client.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+myrig-client-linux.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+myrig-client-windows.workspace = true
+
+[lints]
+workspace = true

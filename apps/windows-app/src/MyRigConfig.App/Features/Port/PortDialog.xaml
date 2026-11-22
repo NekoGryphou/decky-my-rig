@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="MyRigConfig.Features.Port.PortDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:shared="using:MyRigConfig.Shared"
+    xmlns:local="using:MyRigConfig.Features.Port"
+    AutomationProperties.AutomationId="PortDialog"
+    Title="{x:Bind local:PortMessages.Title, Mode=OneTime}"
+    CloseButtonText="{x:Bind shared:SharedMessages.Cancel, Mode=OneTime}"
+    DefaultButton="Primary"
+    IsPrimaryButtonEnabled="{x:Bind ViewModel.CanSave, Mode=OneWay}"
+    PrimaryButtonText="{x:Bind local:PortMessages.Save, Mode=OneTime}"
+    PrimaryButtonStyle="{ThemeResource AccentButtonStyle}"
+    Style="{StaticResource DefaultContentDialogStyle}">
+
+    <StackPanel MinWidth="320" Spacing="8">
+        <NumberBox
+            x:Name="PortBox"
+            AutomationProperties.AutomationId="PortInput"
+            Header="{x:Bind local:PortMessages.PortLabel, Mode=OneTime}"
+            SpinButtonPlacementMode="Hidden"
+            Value="{x:Bind ViewModel.PortInput, Mode=TwoWay}" />
+        <StackPanel
+            Orientation="Horizontal"
+            Spacing="8"
+            Visibility="{x:Bind ViewModel.HasError, Mode=OneWay}">
+            <FontIcon
+                VerticalAlignment="Center"
+                FontSize="14"
+                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                Glyph="&#xEA39;" />
+            <TextBlock
+                AutomationProperties.AutomationId="PortError"
+                AutomationProperties.LiveSetting="Assertive"
+                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="{x:Bind ViewModel.Error, Mode=OneWay}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+        <TextBlock
+            Margin="0,8,0,0"
+            Style="{StaticResource SecondaryTextBlockStyle}"
+            Text="{x:Bind local:PortMessages.Consequence, Mode=OneTime}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</ContentDialog>

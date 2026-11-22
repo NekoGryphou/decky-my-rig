@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="MyRigConfig.Features.Host.HostPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:MyRigConfig.Features.Host"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel
+            MaxWidth="{StaticResource PageContentMaxWidth}"
+            Padding="{StaticResource PageContentPadding}"
+            Spacing="{StaticResource SettingsCardSpacing}">
+
+            <!--  Only when something needs attention; results of actions are closable  -->
+            <InfoBar
+                AutomationProperties.AutomationId="StatusNotice"
+                IsClosable="False"
+                IsOpen="{x:Bind ViewModel.IsNoticeOpen, Mode=OneWay}"
+                Message="{x:Bind ViewModel.NoticeMessage, Mode=OneWay}"
+                Severity="{x:Bind local:HostPageHelpers.ToSeverity(ViewModel.NoticeSeverity), Mode=OneWay}"
+                Title="{x:Bind ViewModel.NoticeTitle, Mode=OneWay}">
+                <InfoBar.ActionButton>
+                    <Button
+                        AutomationProperties.AutomationId="NoticeStartButton"
+                        Command="{x:Bind ViewModel.StartServiceCommand}"
+                        Content="{x:Bind local:HostMessages.StartAction, Mode=OneTime}"
+                        Visibility="{x:Bind ViewModel.ShowStartButton, Mode=OneWay}" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <InfoBar
+                AutomationProperties.AutomationId="Feedback"
+                IsOpen="{x:Bind ViewModel.IsFeedbackOpen, Mode=TwoWay}"
+                Message="{x:Bind ViewModel.FeedbackMessage, Mode=OneWay}"
+                Severity="{x:Bind local:HostPageHelpers.ToSeverity(ViewModel.FeedbackSeverity), Mode=OneWay}" />
+
+            <!--  Paired devices  -->
+            <Grid Margin="{StaticResource FirstSectionHeaderMargin}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    AutomationProperties.HeadingLevel="Level2"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="{x:Bind local:HostMessages.PairedDevicesHeader, Mode=OneTime}" />
+                <Button
+                    Grid.Column="1"
+                    AutomationProperties.AutomationId="PairDeviceButton"
+                    AutomationProperties.Name="{x:Bind local:HostMessages.PairDeviceAction, Mode=OneTime}"
+                    Command="{x:Bind ViewModel.PairCommand}"
+                    IsEnabled="{x:Bind ViewModel.CanManage, Mode=OneWay}"
+                    Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="14" Glyph="&#xE710;" />
+                        <TextBlock Text="{x:Bind local:HostMessages.PairDeviceAction, Mode=OneTime}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <InfoBar
+                AutomationProperties.AutomationId="NoDevicesNotice"
+                IsClosable="False"
+                IsOpen="{x:Bind ViewModel.ShowNoDevices, Mode=OneWay}"
+                Severity="Informational"
+                Title="{x:Bind ViewModel.NoDevicesText, Mode=OneWay}" />
+
+            <ItemsRepeater AutomationProperties.AutomationId="PairedDeviceList" ItemsSource="{x:Bind ViewModel.PairedDevices, Mode=OneWay}">
+                <ItemsRepeater.Layout>
+                    <StackLayout Spacing="{StaticResource SettingsCardSpacing}" />
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="local:ManagedDeviceSummary">
+                        <toolkit:SettingsCard Header="{x:Bind Name, Mode=OneTime}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE7FC;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <Button
+                                AutomationProperties.AutomationId="{x:Bind MoreAutomationId, Mode=OneTime}"
+                                AutomationProperties.Name="{x:Bind MoreLabel, Mode=OneTime}"
+                                IsEnabled="{x:Bind CanEdit, Mode=OneWay}"
+                                Style="{StaticResource SubtleButtonStyle}"
+                                ToolTipService.ToolTip="{x:Bind local:HostMessages.MoreOptions, Mode=OneTime}">
+                                <FontIcon FontSize="16" Glyph="&#xE712;" />
+                                <Button.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuFlyoutItem
+                                            AutomationProperties.AutomationId="{x:Bind RenameAutomationId, Mode=OneTime}"
+                                            AutomationProperties.Name="{x:Bind RenameLabel, Mode=OneTime}"
+                                            Command="{x:Bind RenameCommand}"
+                                            CommandParameter="{x:Bind DeviceId, Mode=OneTime}"
+                                            Text="{x:Bind local:HostMessages.RenameAction, Mode=OneTime}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8AC;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem
+                                            AutomationProperties.AutomationId="{x:Bind RemoveAutomationId, Mode=OneTime}"
+                                            AutomationProperties.Name="{x:Bind RemoveLabel, Mode=OneTime}"
+                                            Command="{x:Bind RemoveCommand}"
+                                            CommandParameter="{x:Bind DeviceId, Mode=OneTime}"
+                                            Text="{x:Bind local:HostMessages.RemoveAction, Mode=OneTime}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE74D;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+                        </toolkit:SettingsCard>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+
+            <!--  Service  -->
+            <TextBlock
+                AutomationProperties.HeadingLevel="Level2"
+                Style="{StaticResource SectionHeaderTextBlockStyle}"
+                Text="{x:Bind local:HostMessages.ServiceHeader, Mode=OneTime}" />
+            <toolkit:SettingsCard Header="{x:Bind local:HostMessages.StatusLabel, Mode=OneTime}">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE770;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <StackPanel
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                            Glyph="&#xE73E;"
+                            Visibility="{x:Bind ViewModel.IsServiceRunning, Mode=OneWay}" />
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                            Glyph="&#xE711;"
+                            Visibility="{x:Bind ViewModel.IsServiceDown, Mode=OneWay}" />
+                        <ProgressRing
+                            Width="14"
+                            Height="14"
+                            IsActive="{x:Bind ViewModel.IsServicePending, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.IsServicePending, Mode=OneWay}" />
+                        <TextBlock
+                            AutomationProperties.AutomationId="ServiceStatus"
+                            Style="{StaticResource SecondaryTextBlockStyle}"
+                            Text="{x:Bind ViewModel.ServiceStatusText, Mode=OneWay}" />
+                    </StackPanel>
+                    <Button
+                        AutomationProperties.AutomationId="StartServiceButton"
+                        Command="{x:Bind ViewModel.StartServiceCommand}"
+                        Content="{x:Bind local:HostMessages.StartAction, Mode=OneTime}"
+                        Visibility="{x:Bind ViewModel.ShowStartButton, Mode=OneWay}" />
+                    <Button
+                        AutomationProperties.AutomationId="RestartServiceButton"
+                        Command="{x:Bind ViewModel.RestartServiceCommand}"
+                        Content="{x:Bind local:HostMessages.RestartAction, Mode=OneTime}"
+                        Visibility="{x:Bind ViewModel.ShowRestartButton, Mode=OneWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+            <local:InvokableSettingsCard
+                AutomationProperties.AutomationId="PortCard"
+                AutomationProperties.Name="{x:Bind ViewModel.PortAccessibleName, Mode=OneWay}"
+                Command="{x:Bind ViewModel.ChangePortCommand}"
+                Header="{x:Bind local:HostMessages.PortLabel, Mode=OneTime}"
+                IsClickEnabled="True"
+                IsEnabled="{x:Bind ViewModel.CanChangePort, Mode=OneWay}">
+                <local:InvokableSettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE968;" />
+                </local:InvokableSettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="{x:Bind ViewModel.PortConflictText, Mode=OneWay}"
+                        FontSize="14"
+                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                        Glyph="&#xE7BA;"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.PortConflictText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.HasPortConflict, Mode=OneWay}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="HostPort"
+                        Style="{StaticResource SecondaryTextBlockStyle}"
+                        Text="{x:Bind ViewModel.Port, Mode=OneWay}" />
+                </StackPanel>
+            </local:InvokableSettingsCard>
+            <toolkit:SettingsCard
+                Description="{x:Bind local:HostMessages.TestModeDescription, Mode=OneTime}"
+                Header="{x:Bind local:HostMessages.TestModeLabel, Mode=OneTime}">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xEBE8;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    AutomationProperties.AutomationId="TestModeSwitch"
+                    AutomationProperties.Name="{x:Bind local:HostMessages.TestModeLabel, Mode=OneTime}"
+                    IsEnabled="{x:Bind ViewModel.CanManage, Mode=OneWay}"
+                    IsOn="{x:Bind ViewModel.TestModeOn, Mode=OneWay}"
+                    OffContent="{x:Bind local:HostMessages.Off, Mode=OneTime}"
+                    OnContent="{x:Bind local:HostMessages.On, Mode=OneTime}"
+                    Toggled="TestMode_Toggled" />
+            </toolkit:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

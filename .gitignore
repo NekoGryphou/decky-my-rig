@@ -1,0 +1,16 @@
+# * Generated: everything a script builds or caches goes in out/.
+/out/
+
+# - Build folders.
+node_modules/
+/dist/
+apps/windows-app/**/bin/
+apps/windows-app/**/obj/
+__pycache__/
+
+# ? cargo-fuzz creates it even when failing inputs go to out/fuzz.
+fuzz/artifacts/
+
+# - Local tools and editors.
+.idea/
+.vscode/

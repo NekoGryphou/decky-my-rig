@@ -1,0 +1,37 @@
+[package]
+name = "myrig-client"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lib]
+name = "myrig_client"
+
+[dependencies]
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
+myrig-pairing-crypto.workspace = true
+myrig-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustls.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+tokio-rustls.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+tempfile = { workspace = true, optional = true }
+zeroize.workspace = true
+
+[features]
+# - Store fixtures for the platform crates' tests.
+testing = ["dep:tempfile"]
+
+[dev-dependencies]
+myrig-host-core.workspace = true
+rcgen.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

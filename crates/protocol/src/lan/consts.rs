@@ -1,0 +1,10 @@
+pub const PROTOCOL_MAJOR: u64 = 1;
+pub const PROTOCOL_MINOR: u64 = 0;
+pub const STATUS_PATH: &str = "/v1/status";
+pub const SHUTDOWN_PATH: &str = "/v1/shutdown";
+pub const SHUTDOWN_TEST_PATH: &str = "/v1/shutdown/test";
+pub const PAIRING_PATH: &str = "/v1/pairing";
+pub const PAIR_REQUEST_PATH: &str = "/v1/pair/request";
+pub const PAIR_INFO_PATH: &str = "/v1/pair/opaque/info";
+pub const PAIR_START_PATH: &str = "/v1/pair/opaque/start";
+pub const PAIR_FINISH_PATH: &str = "/v1/pair/opaque/finish";

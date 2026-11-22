@@ -1,0 +1,19 @@
+[build]
+# * Every build goes to this one shared folder. CARGO_TARGET_DIR still takes
+#   priority.
+target-dir = "out/cargo"
+
+# ? The static Linux agents. ring's few C files only need the compiler's own
+#   headers, so no musl toolchain is needed. aarch64 cross-compiles with clang and
+#   links with the linker rustup ships.
+[env]
+CC_x86_64_unknown_linux_musl = "cc"
+CC_aarch64_unknown_linux_musl = "clang"
+CFLAGS_aarch64_unknown_linux_musl = "--target=aarch64-linux-musl"
+
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+
+[alias]
+# - Repo tasks: `cargo xtask plugin` builds the Decky plugin release.
+xtask = "run --quiet --locked -p xtask --"

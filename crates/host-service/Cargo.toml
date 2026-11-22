@@ -1,0 +1,11 @@
+[package]
+name = "myrig-service"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+myrig-host-windows = { workspace = true, features = ["service"] }
+
+[lints]
+workspace = true

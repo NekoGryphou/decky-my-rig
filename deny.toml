@@ -1,0 +1,44 @@
+# - Dependency gate run by tools/check.sh: known advisories, licences, sources.
+[graph]
+all-features = true
+# ? The platforms releases ship for; a dependency only another target builds
+#   never reaches a user.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0387", reason = "Ristretto255 suite; crypto-bigint arithmetic unused" },
+    # ? zbus is the Linux backend of notify-rust and system_shutdown, which only
+    #   Windows builds use; cargo-deny checks each edge against the targets
+    #   separately, so the path counts though no target builds it.
+    { id = "RUSTSEC-2026-0370", reason = "zbus: no shipped target builds it" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus: no shipped target builds it" },
+    { id = "RUSTSEC-2026-0372", reason = "zbus: no shipped target builds it" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+    "0BSD",
+]
+private = { ignore = true }
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
