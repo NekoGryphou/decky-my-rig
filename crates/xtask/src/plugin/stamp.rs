@@ -13,11 +13,23 @@ use std::{
 /// depends on what the files say and where they are, not on when they were
 /// written or where the checkout lives.
 pub(super) fn input_hash(root: &Path, crate_dirs: &[PathBuf]) -> Result<String, String> {
+    // ? Both sides get one spelling, or names that should be relative come out absolute.
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", root.display()))?;
+    let crate_dirs = crate_dirs
+        .iter()
+        .map(|dir| {
+            dir.canonicalize()
+                .map_err(|error| format!("{}: {error}", dir.display()))
+        })
+        .collect::<Result<Vec<PathBuf>, String>>()?;
+    let root = root.as_path();
     let mut paths: Vec<PathBuf> = ["Cargo.toml", "Cargo.lock"]
         .iter()
         .map(|name| root.join(name))
         .collect();
-    for directory in crate_dirs {
+    for directory in &crate_dirs {
         paths.push(directory.join("Cargo.toml"));
         paths.push(directory.join("build.rs"));
         paths.push(directory.join("src"));

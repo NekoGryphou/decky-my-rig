@@ -331,3 +331,28 @@ fn windows_agents_must_be_pe_files_for_their_processor() {
     assert!(!is_pe(b"\x7fELF", PE_X86_64));
     assert!(!is_pe(&pe_header(PE_X86_64)[..0x44], PE_X86_64));
 }
+
+#[test]
+fn the_hash_does_not_depend_on_how_the_same_folders_are_spelled() {
+    // ! A symlink gives the same folders two spellings. Their hashes must match, or
+    //   a Windows runner (verbatim paths) and a Linux one would disagree about one tree.
+    let (root, crate_dir) = workspace();
+    let link = root.with_file_name(format!(
+        "{}-link",
+        root.file_name().unwrap().to_string_lossy()
+    ));
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    #[cfg(unix)]
+    {
+        // ? The root is canonical, as the stamp makes it; the crate folder comes from cargo's metadata.
+        let canonical_root = root.canonicalize().unwrap();
+        let plain =
+            super::stamp::input_hash(&canonical_root, std::slice::from_ref(&crate_dir)).unwrap();
+        let spelled =
+            super::stamp::input_hash(&canonical_root, &[link.join("crates/app")]).unwrap();
+        assert_eq!(plain, spelled);
+        std::fs::remove_file(&link).unwrap();
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
