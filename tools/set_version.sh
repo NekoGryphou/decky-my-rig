@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Writes the release version into the manifests. The version comes from the tag
-# (v1.2.3) when CI builds a tag, else from the latest tag, else 0.0.0. The
-# repository keeps 0.0.0 and CI rewrites it; nothing else holds a version.
+# Writes the release version from the tag into the manifests. Only a tag build
+# (vX.Y.Z) changes anything; any other build keeps the 0.0.0 placeholder.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-    tag="$GITHUB_REF_NAME"
-else
-    tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || echo v0.0.0)"
+if [[ "${GITHUB_REF_TYPE:-}" != "tag" ]]; then
+    echo "not a tag build; the version stays 0.0.0" >&2
+    exit 0
 fi
+tag="$GITHUB_REF_NAME"
 version="${tag#v}"
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "not a version: $tag (expected vX.Y.Z)" >&2
