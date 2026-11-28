@@ -11,7 +11,6 @@ targets = [
 
 [advisories]
 ignore = [
-    { id = "RUSTSEC-2026-0387", reason = "Ristretto255 suite; crypto-bigint arithmetic unused" },
     # ? zbus is the Linux backend of notify-rust and system_shutdown, which only Windows builds use;
     # ? cargo-deny checks each edge against the targets separately, so the path counts though no
     # ? target builds it.
