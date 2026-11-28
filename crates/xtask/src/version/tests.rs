@@ -27,7 +27,10 @@ fn every_manifest_records_the_same_version() {
 
     let plugin: serde_json::Value = serde_json::from_str(&read("package.json")).unwrap();
     assert_eq!(plugin["version"], declared.as_str());
-    assert!(read("apps/windows-app/Directory.Build.props").contains(&format!("<Version>{declared}</Version>")));
+    assert!(
+        read("apps/windows-app/Directory.Build.props")
+            .contains(&format!("<Version>{declared}</Version>"))
+    );
 
     for member in fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap() {
         let manifest = member.unwrap().path().join("Cargo.toml");
