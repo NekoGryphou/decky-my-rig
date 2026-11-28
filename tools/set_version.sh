@@ -22,29 +22,36 @@ import re, sys
 from pathlib import Path
 version = sys.argv[1]
 
+# ? Bytes in and out: text mode would write CRLF on Windows, and the stamp hashes these files.
+def read(path):
+    return Path(path).read_bytes().decode("utf-8")
+
+def write(path, text):
+    Path(path).write_bytes(text.encode("utf-8"))
+
 def rewrite(path, pattern, replacement, count=1):
-    text = Path(path).read_text(encoding="utf-8")
+    text = read(path)
     new, n = re.subn(pattern, replacement, text, count=count, flags=re.M)
     if n != count:
         raise SystemExit(f"{path}: expected {count} version line(s), found {n}")
-    Path(path).write_text(new, encoding="utf-8")
+    write(path, new)
 
 rewrite("Cargo.toml", r'^version = "[^"]*"', f'version = "{version}"')
 rewrite("package.json", r'"version": "[^"]*"', f'"version": "{version}"')
 rewrite("apps/windows-app/Directory.Build.props", r"<Version>[^<]*</Version>", f"<Version>{version}</Version>")
 
 # Workspace members are the lock entries without a source (registry or git).
-lock = Path("Cargo.lock").read_text(encoding="utf-8")
+lock = read("Cargo.lock")
 lock, n = re.subn(r'(name = "[^"]+"\nversion = )"[^"]*"(\n(?!source = ))', rf'\g<1>"{version}"\g<2>', lock)
 if n == 0:
     raise SystemExit("Cargo.lock: no workspace packages found")
-Path("Cargo.lock").write_text(lock, encoding="utf-8")
+write("Cargo.lock", lock)
 
 # The fuzz workspace pins the same packages, but its own crate keeps its version.
-fuzz = Path("fuzz/Cargo.lock").read_text(encoding="utf-8")
+fuzz = read("fuzz/Cargo.lock")
 fuzz, n = re.subn(r'(name = "myrig(?!-fuzz")[^"]*"\nversion = )"[^"]*"(\n(?!source = ))', rf'\g<1>"{version}"\g<2>', fuzz)
 if n == 0:
     raise SystemExit("fuzz/Cargo.lock: no myrig packages found")
-Path("fuzz/Cargo.lock").write_text(fuzz, encoding="utf-8")
+write("fuzz/Cargo.lock", fuzz)
 print(version)
 PY
