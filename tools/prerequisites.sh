@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # - Sourced by the check and build scripts. They declare what they need, and
 #   report_missing lists each missing tool with how to install it, then stops
 #   before any work starts.

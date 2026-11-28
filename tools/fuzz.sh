@@ -14,8 +14,8 @@ cargo fuzz --version >/dev/null 2>&1 \
 report_missing
 # ! The fuzz lock must not be rewritten under the run; see check_linux.sh.
 cargo fetch --locked
-# ! cargo-fuzz builds for the target it was built for itself. CI downloads
-#   a static musl build, and sanitizers can't link musl statically.
+# ! cargo-fuzz builds for the target it was built for itself. CI downloads a static musl build, and
+# ! sanitizers can't link musl statically.
 host="$(rustc -vV | sed -n 's/^host: //p')"
 
 # ! A failing command substitution in a for list does not stop the script.

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Runtime.Versioning;
 using System.IO.Pipes;
 using System.Security.Principal;
+using MyRigConfig.Core.Host;
 using MyRigConfig.Core.LocalControl;
 
 namespace MyRigConfig.Tests;
@@ -14,11 +15,10 @@ namespace MyRigConfig.Tests;
 public class HostControlClientTests
 {
     [TestMethod]
-    public void OrdinaryBuildPinsProductionServiceAndPipe()
+    public void ProductionServiceAndPipeNamesMatchTheHost()
     {
-        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
-        Assert.AreEqual("MyRigHost", typeof(ControlServerIdentityConstants).GetField("ServiceName", flags)?.GetRawConstantValue());
-        Assert.AreEqual(@"\\.\pipe\MyRigHost.Control.v1", typeof(LocalControlConstants).GetField("PipePath", flags)?.GetRawConstantValue());
+        Assert.AreEqual("MyRigHost", HostConstants.ServiceName);
+        Assert.AreEqual(@"\\.\pipe\MyRigHost.Control.v1", LocalControlConstants.PipePath);
     }
 
     [TestMethod]
@@ -29,9 +29,9 @@ public class HostControlClientTests
         foreach (var failure in new Exception[] { new HostControlException(true), new IOException(), new OperationCanceledException() })
         {
             Assert.IsInstanceOfType<OperationCanceledException>(
-                HostControlClient.Failure(failure, true, LocalControlOperation.SetPort, cancelled.Token));
+                HostControlClientService.Failure(failure, true, LocalControlOperation.SetPort, cancelled.Token));
         }
-        var hostFailure = HostControlClient.Failure(new IOException(), true, LocalControlOperation.SetPort, CancellationToken.None);
+        var hostFailure = HostControlClientService.Failure(new IOException(), true, LocalControlOperation.SetPort, CancellationToken.None);
         Assert.IsTrue(hostFailure is HostControlException { OutcomeUncertain: true });
     }
 
@@ -50,7 +50,7 @@ public class HostControlClientTests
             await client.ConnectAsync(2000, deadline.Token);
             await connected;
             var expectedService = new SecurityIdentifier("S-1-5-80-1141499660-3876455147-362637617-4292076426-725672618");
-            Assert.ThrowsException<SecurityException>(() => ControlServerIdentity.RequireOwner(client.SafePipeHandle, expectedService));
+            Assert.ThrowsException<SecurityException>(() => ControlServerIdentityNative.RequireOwner(client.SafePipeHandle, expectedService));
         }
         // - The refused client closed its handle without sending a frame prefix.
         var buffer = new byte[1];
@@ -71,26 +71,24 @@ public class HostControlClientTests
         await client.ConnectAsync(2000, deadline.Token);
         await connected;
         using var current = WindowsIdentity.GetCurrent();
-        ControlServerIdentity.RequireOwner(client.SafePipeHandle, current.Owner!);
+        ControlServerIdentityNative.RequireOwner(client.SafePipeHandle, current.Owner!);
     }
 
     [TestMethod]
     public async Task ManagementClientFramesAndParsesAcrossTransportBoundary()
     {
-        var response = Encoding.UTF8.GetBytes("""
-            {"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","paired_devices":[{"device_id":"11111111-1111-4111-8111-111111111111","name":"Bedroom device"}]}
-            """);
+        var response = TestHost.Bytes(TestHost.ListJson((TestHost.DeviceIdText, "Bedroom device")));
         var frame = new byte[4 + response.Length];
         BinaryPrimitives.WriteUInt32LittleEndian(frame, (uint)response.Length);
         response.CopyTo(frame, 4);
         using var pipe = new Duplex(frame);
         var checks = 0;
-        var client = new HostControlClient((request, sending, token) =>
-            HostControlClient.ExchangeFrameAsync(pipe, request, () => checks++, sending, token));
+        var client = new HostControlClientService((request, sending, token) =>
+            HostControlClientService.ExchangeFrameAsync(pipe, request, () => checks++, sending, token));
         var reply = await client.ListAsync(CancellationToken.None) as LocalControlListReply;
         Assert.IsNotNull(reply);
         Assert.AreEqual("Bedroom device", reply.PairedDevices.Single().Name);
-        Assert.AreEqual(Guid.Parse("03c85317-9d93-4fb3-a04b-91a0e16668c6"), reply.HostId);
+        Assert.AreEqual(TestHost.Id, reply.HostId);
         Assert.AreEqual(2, checks);
         var written = pipe.Output.ToArray();
         Assert.AreEqual((uint)(written.Length - 4), BinaryPrimitives.ReadUInt32LittleEndian(written));
@@ -101,10 +99,36 @@ public class HostControlClientTests
     }
 
     [TestMethod]
+    [DataRow(typeof(IOException))]
+    [DataRow(typeof(SecurityException))]
+    [DataRow(typeof(UnauthorizedAccessException))]
+    [DataRow(typeof(System.ComponentModel.Win32Exception))]
+    [DataRow(typeof(TimeoutException))]
+    [DataRow(typeof(IdentityNotMappedException))]
+    public async Task TransportFailuresAreHostFailures(Type failure)
+    {
+        var client = new HostControlClientService((_, _, _) => throw (Exception)Activator.CreateInstance(failure)!);
+        await Assert.ThrowsExceptionAsync<HostControlException>(() => client.ListAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
+    [DataRow(typeof(InvalidOperationException))]
+    [DataRow(typeof(NullReferenceException))]
+    [DataRow(typeof(ArgumentException))]
+    public async Task ProgrammingErrorsAreNotReportedAsAnUnavailableHost(Type failure)
+    {
+        var client = new HostControlClientService((_, _, _) => throw (Exception)Activator.CreateInstance(failure)!);
+        Exception? thrown = null;
+        try { await client.ListAsync(CancellationToken.None); }
+        catch (Exception exception) { thrown = exception; }
+        Assert.IsInstanceOfType(thrown, failure);
+    }
+
+    [TestMethod]
     public async Task InvalidTransportReplyStillFailsClosedWithoutRetry()
     {
         var calls = 0;
-        var client = new HostControlClient((_, sending, _) =>
+        var client = new HostControlClientService((_, sending, _) =>
         {
             calls++;
             sending();
@@ -143,7 +167,7 @@ public class HostControlClientTests
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows-only client fixture.");
         using var pipe = new Duplex([]);
         var sending = false;
-        await Assert.ThrowsExceptionAsync<SecurityException>(() => HostControlClient.ExchangeFrameAsync(
+        await Assert.ThrowsExceptionAsync<SecurityException>(() => HostControlClientService.ExchangeFrameAsync(
             pipe, [1], () => throw new SecurityException("fixture denial"), () => sending = true, CancellationToken.None));
         Assert.AreEqual(0L, pipe.Output.Length);
         Assert.IsFalse(sending);
@@ -155,7 +179,7 @@ public class HostControlClientTests
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows-only client fixture.");
         using var pipe = new Duplex([1, 0, 0, 0, 42]);
         var checks = 0;
-        await Assert.ThrowsExceptionAsync<SecurityException>(() => HostControlClient.ExchangeFrameAsync(
+        await Assert.ThrowsExceptionAsync<SecurityException>(() => HostControlClientService.ExchangeFrameAsync(
             pipe, [7], () =>
             {
                 if (++checks != 2) return;
@@ -173,7 +197,7 @@ public class HostControlClientTests
         using var pipe = new Duplex([3, 0, 0, 0, 10, 11, 12]);
         var verified = false;
         var sending = false;
-        var reply = await HostControlClient.ExchangeFrameAsync(pipe, [7, 8], () => verified = true,
+        var reply = await HostControlClientService.ExchangeFrameAsync(pipe, [7, 8], () => verified = true,
             () => { Assert.IsTrue(verified); sending = true; }, CancellationToken.None);
         CollectionAssert.AreEqual(new byte[] { 10, 11, 12 }, reply);
         CollectionAssert.AreEqual(new byte[] { 2, 0, 0, 0, 7, 8 }, pipe.Output.ToArray());
@@ -189,12 +213,12 @@ public class HostControlClientTests
             var prefix = new byte[4];
             BinaryPrimitives.WriteUInt32LittleEndian(prefix, length);
             using var pipe = new Duplex(prefix);
-            await Assert.ThrowsExceptionAsync<IOException>(() => HostControlClient.ExchangeFrameAsync(
+            await Assert.ThrowsExceptionAsync<IOException>(() => HostControlClientService.ExchangeFrameAsync(
                 pipe, [7], () => { }, () => { }, CancellationToken.None));
             Assert.AreEqual(5L, pipe.Output.Length);
         }
         using var truncated = new Duplex([2, 0, 0, 0]);
-        await Assert.ThrowsExceptionAsync<EndOfStreamException>(() => HostControlClient.ExchangeFrameAsync(
+        await Assert.ThrowsExceptionAsync<EndOfStreamException>(() => HostControlClientService.ExchangeFrameAsync(
             truncated, [7], () => { }, () => { }, CancellationToken.None));
         Assert.AreEqual(5L, truncated.Output.Length);
     }
@@ -204,10 +228,10 @@ public class HostControlClientTests
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows-only client fixture.");
         using var pipe = new Duplex([]);
-        await Assert.ThrowsExceptionAsync<OperationCanceledException>(() => HostControlClient.ExchangeFrameAsync(
+        await Assert.ThrowsExceptionAsync<OperationCanceledException>(() => HostControlClientService.ExchangeFrameAsync(
             pipe, [7], () => Assert.Fail(), () => Assert.Fail(), new CancellationToken(true)));
         foreach (var request in new byte[][] { [], new byte[1025] })
-            await Assert.ThrowsExceptionAsync<HostControlException>(() => HostControlClient.ExchangeFrameAsync(
+            await Assert.ThrowsExceptionAsync<HostControlException>(() => HostControlClientService.ExchangeFrameAsync(
                 pipe, request, () => Assert.Fail(), () => Assert.Fail(), CancellationToken.None));
         Assert.AreEqual(0L, pipe.Output.Length);
     }

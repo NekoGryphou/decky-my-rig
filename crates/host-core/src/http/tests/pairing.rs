@@ -89,7 +89,7 @@ async fn secure_pairing_authentication_persistence_revocation_and_failures() {
             "12345678",
             [7; 32],
             b"cert",
-            [index; 32],
+            &[index; 32],
             device(index.into()),
             Arc::new(move |bytes| {
                 assert!(current.authenticated_device(&expected).is_none());
@@ -152,7 +152,7 @@ async fn secure_pairing_authentication_persistence_revocation_and_failures() {
         "12345678",
         [7; 32],
         b"cert",
-        [5; 32],
+        &[5; 32],
         device(5),
         Arc::new(move |_| {
             entered_tx.lock().unwrap().take().unwrap().send(()).unwrap();
@@ -186,7 +186,7 @@ async fn secure_pairing_authentication_persistence_revocation_and_failures() {
             "12345678",
             [7; 32],
             b"cert",
-            [6; 32],
+            &[6; 32],
             device(6),
             Arc::new(|_| Ok(()))
         )
@@ -203,7 +203,7 @@ async fn secure_pairing_authentication_persistence_revocation_and_failures() {
             "12345678",
             [7; 32],
             b"cert",
-            [index; 32],
+            &[index; 32],
             device(index.into()),
             Arc::new(move |_| {
                 Err(match error {
@@ -234,8 +234,8 @@ async fn secure_pairing_authentication_persistence_revocation_and_failures() {
 }
 
 #[tokio::test]
-// ? The lock is held on purpose: the opener should refuse right away, before any
-//   blocking work, rather than wait behind a save.
+// ? The lock is held on purpose: the opener should refuse right away, before any blocking work,
+// ? rather than wait behind a save.
 #[allow(clippy::await_holding_lock)]
 async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
     let host = empty_registry_host();
@@ -247,7 +247,7 @@ async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
             "12345678",
             [7; 32],
             b"cert",
-            [2; 32],
+            &[2; 32],
             device(2),
             Arc::new(|_| Ok(()))
         )
@@ -261,7 +261,7 @@ async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
         "12345678",
         [7; 32],
         b"cert",
-        [2; 32],
+        &[2; 32],
         device(2),
         Arc::new(|_| Ok(())),
     )
@@ -280,7 +280,7 @@ async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
         "12345678",
         [7; 32],
         b"cert",
-        [2; 32],
+        &[2; 32],
         device(2),
         Arc::new(|_| Ok(())),
     )
@@ -303,7 +303,7 @@ async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
         "12345678",
         [7; 32],
         b"cert",
-        [2; 32],
+        &[2; 32],
         device(2),
         Arc::new(|_| Ok(())),
     )
@@ -335,7 +335,7 @@ async fn secure_pairing_admission_closure_and_cancelled_prepare_join() {
             "12345678",
             [7; 32],
             b"cert",
-            [3; 32],
+            &[3; 32],
             device(3),
             Arc::new(|_| Ok(()))
         )
@@ -367,7 +367,7 @@ async fn secure_http_stop_joins_claimed_save_and_closes_unclaimed_code() {
         "12345678",
         [7; 32],
         &certificate,
-        [1; 32],
+        &[1; 32],
         device(1),
         Arc::new(move |_| {
             entered.lock().unwrap().take().unwrap().send(()).unwrap();
@@ -431,7 +431,7 @@ async fn secure_http_stop_joins_claimed_save_and_closes_unclaimed_code() {
         "87654321",
         [7; 32],
         &certificate,
-        [2; 32],
+        &[2; 32],
         device(2),
         Arc::new(|_| panic!("unclaimed code must not persist on stop")),
     )
@@ -471,7 +471,7 @@ async fn unused_pairing_code_is_replaced_and_local_close_invalidates_the_replace
         "12345678",
         [7; 32],
         b"cert",
-        [1; 32],
+        &[1; 32],
         device(1),
         Arc::new(|_| panic!("replaced approval must not save")),
     )
@@ -483,7 +483,7 @@ async fn unused_pairing_code_is_replaced_and_local_close_invalidates_the_replace
         "87654321",
         [7; 32],
         b"cert",
-        [2; 32],
+        &[2; 32],
         device(2),
         Arc::new(|_| Ok(())),
     )
@@ -546,7 +546,7 @@ async fn poisoned_pairing_state_is_unavailable_not_busy() {
             "12345678",
             [7; 32],
             b"cert",
-            [2; 32],
+            &[2; 32],
             device(2),
             Arc::new(|_| Ok(())),
         )
@@ -572,80 +572,44 @@ async fn re_pairing_revokes_only_the_credential_it_replaces() {
     assert_eq!(host.paired_devices().unwrap().len(), 3);
 }
 
-/// Opens code 12345678 for certificate `cert` and returns that certificate's
-/// binding.
-async fn open_code(host: &Arc<Host>) -> [u8; 32] {
+#[tokio::test]
+async fn a_full_registry_names_the_refusal_and_keeps_the_code_usable() {
+    let host = empty_registry_host();
+    let last_slot = crate::paired_devices::MAX_PAIRED_DEVICES as u8 - 1;
+    for index in 1..=last_slot {
+        pair_device(&host, index, None).await.unwrap();
+    }
     host.open_secure_pairing(
         host.pairing_approval(),
         "Device",
         "12345678",
         [7; 32],
         b"cert",
-        [1; 32],
-        device(1),
+        &[100; 32],
+        device(100),
         Arc::new(|_| Ok(())),
     )
     .await
     .unwrap();
-    Sha256::digest(b"cert").into()
-}
-
-#[tokio::test]
-async fn a_successful_pairing_resets_the_guess_budget() {
-    // - A user who mistyped the code isn't slowed down once they pair.
-    let host = empty_registry_host();
-    let now = std::time::Instant::now();
-    assert_eq!(host.request_pairing("Device", now), Ok(()));
-    let binding = open_code(&host).await;
-    for _ in 0..2 {
-        let (attempt, wrong) = secure_confirmation(&host, b"87654321", b"cert").await;
-        assert!(wrong.is_none());
-        assert!(
-            host.secure_pairing_finish(attempt, &[0; 64], binding, None)
-                .await
-                .is_err()
-        );
-    }
     let (attempt, confirmation) = secure_confirmation(&host, b"12345678", b"cert").await;
-    assert!(
-        host.secure_pairing_finish(attempt, &confirmation.unwrap(), binding, None)
-            .await
-            .is_ok()
-    );
-    assert_eq!(
-        host.request_pairing("Device", now + REQUEST_INTERVAL),
-        Ok(())
-    );
-}
-
-#[tokio::test]
-async fn a_held_code_is_busy_and_an_unknown_attempt_does_not_hold_it() {
-    let host = empty_registry_host();
-    let binding = open_code(&host).await;
-    // - A finish that names no open attempt is refused before the code is
-    //   claimed.
-    assert!(matches!(
-        host.claim_secure(binding, Some(AttemptId::from_bytes([9; 32]))),
-        Err(PairingRefusal::Unavailable)
-    ));
-    let held = host.claim_secure(binding, None).ok().unwrap();
-    assert_eq!(host.secure_pairing_info(binding), Err(PairingRefusal::Busy));
-    assert!(matches!(
-        host.secure_pairing_start(&[0; 96], binding).await,
-        Err(PairingRefusal::Busy)
-    ));
-    let (session, reservation) = held;
-    reservation.0.restore_secure(session).unwrap();
-    drop(reservation);
-    assert_eq!(host.secure_pairing_info(binding), Ok([7; 32]));
-}
-
-#[test]
-fn the_protocol_states_the_code_lifetime_the_session_enforces() {
-    // ? Local-control clients check expires_in_seconds against the protocol's
-    //   copy of the value, so they don't need the pairing crypto.
-    assert_eq!(
-        myrig_protocol::local_control::PAIRING_CODE_LIFETIME,
-        myrig_pairing_crypto::session::LIFETIME
-    );
+    let confirmation = confirmation.unwrap();
+    let binding: [u8; 32] = Sha256::digest(b"cert").into();
+    // * Another device takes the last slot after the code was opened.
+    host.config
+        .write()
+        .unwrap()
+        .insert_credential(device(101), "Other", [101; 32])
+        .unwrap();
+    let refused = host
+        .secure_pairing_finish(attempt, &confirmation, binding, None)
+        .await;
+    assert_eq!(refused.err(), Some(PairingRefusal::DeviceLimit));
+    // ! The refusal came before the one-shot proof was used, so the same attempt still works once
+    // ! there is room.
+    host.remove_device_checked(device(101), |_| Ok(())).unwrap();
+    let token = host
+        .secure_pairing_finish(attempt, &confirmation, binding, None)
+        .await
+        .unwrap();
+    assert!(host.authenticated_device(&token).is_some());
 }

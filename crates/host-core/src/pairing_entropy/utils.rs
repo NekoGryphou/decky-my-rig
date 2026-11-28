@@ -2,7 +2,7 @@ use super::{
     consts::{ACCEPTED_CODE_RANGE, CODE_RANGE, MAX_CODE_DRAWS},
     messages::FAILURE,
 };
-use uuid::Uuid;
+use uuid::{Builder, Uuid};
 
 fn fill(bytes: &mut [u8]) -> Result<(), &'static str> {
     getrandom::getrandom(bytes).map_err(|_| FAILURE)
@@ -25,11 +25,8 @@ pub(super) fn generate_with(
     random(&mut token)?;
     let mut id = [0; 16];
     random(&mut id)?;
-    id[6] = (id[6] & 0x0f) | 0x40;
-    id[8] = (id[8] & 0x3f) | 0x80;
-    // ! Throw away draws from the incomplete top range, otherwise some codes
-    //   would come up more often (modulo bias). A broken random source still
-    //   can't loop forever.
+    // ! Throw away draws from the incomplete top range, otherwise some codes would come up more
+    // ! often (modulo bias). A broken random source still can't loop forever.
     for _ in 0..MAX_CODE_DRAWS {
         let mut bytes = [0; 4];
         random(&mut bytes)?;
@@ -38,7 +35,7 @@ pub(super) fn generate_with(
             return Ok((
                 format!("{:08}", number % CODE_RANGE),
                 token,
-                Uuid::from_bytes(id),
+                Builder::from_random_bytes(id).into_uuid(),
             ));
         }
     }

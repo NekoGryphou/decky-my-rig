@@ -14,8 +14,7 @@ import decky
 from my_rig.agent import AgentClient
 from my_rig.agent.agent_utils import agent_name, remove_saved_state
 
-# ? If the file is missing, this platform wasn't built; starting the agent reports
-#   its name.
+# ? If the file is missing, this platform wasn't built; starting the agent reports its name.
 _BINARY = (
     Path(__file__).resolve().parent
     / "bin"
@@ -35,8 +34,7 @@ class Plugin:
         await self._agent.close()
 
     async def _uninstall(self) -> None:
-        # ! Decky only calls this on uninstall, after _unload. Updates keep the
-        #   saved PCs.
+        # ! Decky only calls this on uninstall, after _unload. Updates keep the saved PCs.
         try:
             remove_saved_state(self._settings)
         except OSError as error:

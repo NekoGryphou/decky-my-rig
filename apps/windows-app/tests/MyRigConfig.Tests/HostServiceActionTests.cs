@@ -2,6 +2,7 @@ using System.Text;
 using MyRigConfig.Core.Host;
 using MyRigConfig.Core.LocalControl;
 using MyRigConfig.Features.Host;
+using MyRigConfig.Shared;
 
 namespace MyRigConfig.Tests;
 
@@ -13,12 +14,12 @@ public sealed class HostServiceActionTests
     {
         // ! Closing the window waits on this: a restart cut in half would leave the service stopped.
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var tracked = HostServiceControl.Track(finish.Task);
-        Assert.IsFalse(HostServiceControl.Pending.IsCompleted);
+        var tracked = HostServiceControlService.Track(finish.Task);
+        Assert.IsFalse(HostServiceControlService.Pending.IsCompleted);
         finish.SetException(new HostServiceException(new InvalidOperationException()));
         await Assert.ThrowsExceptionAsync<HostServiceException>(() => tracked);
-        await HostServiceControl.Pending;
-        Assert.IsTrue(HostServiceControl.Pending.IsCompleted);
+        await HostServiceControlService.Pending;
+        Assert.IsTrue(HostServiceControlService.Pending.IsCompleted);
     }
 
     [TestMethod]
@@ -45,10 +46,10 @@ public sealed class HostServiceActionTests
             if (completion == "fail") throw new HostServiceException(new InvalidOperationException("Fixture SCM failure."));
             state = ServiceState.Running;
         }
-        var client = new HostControlClient((_, sending, _) =>
+        var client = new HostControlClientService((_, sending, _) =>
         {
             sending();
-            return Task.FromResult(Encoding.UTF8.GetBytes("{\"version\":1,\"ok\":true,\"host_id\":\"03c85317-9d93-4fb3-a04b-91a0e16668c6\",\"paired_devices\":[]}"));
+            return Task.FromResult(TestHost.Bytes(TestHost.ListJson()));
         });
         Task<HostObservation> Observe(CancellationToken token)
         {
@@ -56,7 +57,7 @@ public sealed class HostServiceActionTests
             return Task.FromResult(new HostObservation(state, state == ServiceState.Running
                 ? new HostStatus(49000, false, "listening") : null, null));
         }
-        var model = new HostViewModel(client, Observe, TimeProvider.System,
+        var model = TestHost.Model(client, Observe, null,
             token => { startCalls++; return NativeAction(token); },
             token => { restartCalls++; return NativeAction(token); });
         await model.RefreshCommand.ExecuteAsync(null);
@@ -73,5 +74,47 @@ public sealed class HostServiceActionTests
         Assert.AreEqual(restart ? 1 : 0, restartCalls);
         Assert.AreEqual(2, observations.Count);
         Assert.IsFalse(observations.Last().IsCancellationRequested);
+    }
+
+    [TestMethod]
+    public async Task ARetiredPageIsNotRefreshedAfterTheServiceActionEnds()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observations = 0;
+        using var page = new CancellationTokenSource();
+        var model = TestHost.Model(TestHost.Client(_ => null), _ =>
+        {
+            observations++;
+            return Task.FromResult(new HostObservation(ServiceState.Stopped, null, null));
+        }, null, async _ => { entered.SetResult(); await resume.Task; });
+        model.PageLifetime = page.Token;
+        await model.RefreshCommand.ExecuteAsync(null);
+        var running = model.StartServiceCommand.ExecuteAsync(null);
+        await entered.Task;
+        page.Cancel();
+        resume.SetResult();
+        await running;
+        Assert.AreEqual(1, observations, "only the refresh before the action ran");
+        Assert.IsFalse(model.IsBusy);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AFailedStartOrRestartTellsTheUser(bool restart)
+    {
+        var state = restart ? ServiceState.Running : ServiceState.Stopped;
+        var model = TestHost.Model(TestHost.Client(_ => null),
+            _ => Task.FromResult(new HostObservation(state, state == ServiceState.Running ? TestHost.Status() : null, null)),
+            null,
+            _ => throw new HostServiceException(new InvalidOperationException("Fixture SCM failure.")),
+            _ => throw new HostServiceException(new InvalidOperationException("Fixture SCM failure.")));
+        await model.RefreshCommand.ExecuteAsync(null);
+        await (restart ? model.RestartServiceCommand : model.StartServiceCommand).ExecuteAsync(null);
+        Assert.IsTrue(model.IsFeedbackOpen);
+        Assert.AreEqual(restart ? HostMessages.RestartFailed : HostMessages.StartFailed, model.FeedbackMessage);
+        Assert.AreEqual(MessageTone.Error, model.FeedbackSeverity);
+        Assert.IsFalse(model.IsBusy);
     }
 }

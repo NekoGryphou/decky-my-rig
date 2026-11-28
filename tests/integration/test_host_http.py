@@ -77,7 +77,7 @@ class HostHttpContract(unittest.TestCase):
         self.assertEqual(self.host.request()[0], 200)
 
     def test_duplicate_authorization_is_rejected(self):
-        headers = self.host.headers() + [("Authorization", "Bearer " + self.host.token)]
+        headers = [*self.host.headers(), ("Authorization", "Bearer " + self.host.token)]
         self.assert_error(self.host.request(headers=headers), 401, "unauthorized")
 
     def test_a_bad_token_does_not_lock_out_a_valid_one(self):
@@ -103,13 +103,13 @@ class HostHttpContract(unittest.TestCase):
                 )
         self.assert_error(
             self.host.request(
-                headers=self.host.headers() + [("X-MyRig-Protocol-Major", "1")]
+                headers=[*self.host.headers(), ("X-MyRig-Protocol-Major", "1")]
             ),
             400,
             "invalid_request",
         )
         _, data = self.assert_error(
-            self.host.request(headers=rest + [("X-MyRig-Protocol-Major", "2")]),
+            self.host.request(headers=[*rest, ("X-MyRig-Protocol-Major", "2")]),
             400,
             "unsupported_protocol",
         )
@@ -169,7 +169,7 @@ class HostHttpContract(unittest.TestCase):
                 "POST",
                 "/v1/shutdown",
                 BODY,
-                self.host.headers() + [("Content-Type", "text/plain")],
+                [*self.host.headers(), ("Content-Type", "text/plain")],
             ),
             415,
             "unsupported_media_type",
@@ -182,8 +182,9 @@ class HostHttpContract(unittest.TestCase):
         body = (
             '{"request_id":"' + REQUEST_ID + '","future":{"nested":[1,true,null]}}'
         ).encode()
-        headers = self.host.headers() + [
-            ("Content-Type", "application/json; charset=utf-8")
+        headers = [
+            *self.host.headers(),
+            ("Content-Type", "application/json; charset=utf-8"),
         ]
         self.assertEqual(
             self.host.request("POST", "/v1/shutdown", body, headers)[0], 202
@@ -255,8 +256,7 @@ class HostHttpContract(unittest.TestCase):
                 with self.host.connect() as stream:
                     stream.settimeout(3.5)
                     stream.sendall(payload)
-                    # ? Failures at the transport level can close without a JSON
-                    #   response.
+                    # ? Failures at the transport level can close without a JSON response.
                     total = 0
                     while True:
                         try:
@@ -320,7 +320,7 @@ class PairingHttpContract(unittest.TestCase):
             ("POST", self.INFO, b"", self.headers()),
             ("GET", self.INFO + "?debug=1", b"", self.headers(False)),
             ("GET", self.INFO, b"{}", self.headers(False)),
-            ("GET", self.INFO, b"", self.headers(False) + [bearer]),
+            ("GET", self.INFO, b"", [*self.headers(False), bearer]),
             ("GET", self.INFO, b"", [("Accept", "application/json")]),
             ("GET", self.START, b"", self.headers(False)),
         ):

@@ -8,6 +8,7 @@ import type {
 } from "react";
 import { cloneElement, forwardRef } from "react";
 import { vi } from "vitest";
+import { RPC_METHODS } from "./api.consts";
 import type { PcSnapshot, SnapshotFrame } from "./api.types";
 
 export const mocks = {
@@ -30,6 +31,8 @@ export const mocks = {
   navigateBack: vi.fn(),
   modal: vi.fn(),
   toast: vi.fn(),
+  // - Called with the label each time a Field renders: tests count re-renders.
+  fieldRender: vi.fn(),
 };
 
 // noinspection JSUnusedGlobalSymbols
@@ -38,18 +41,18 @@ export const deckyApi = {
     mocks.routes.push(route);
     return (
       {
-        watch_snapshot: mocks.watch,
-        settings: mocks.settings,
-        begin_pairing: mocks.begin,
-        request_pairing_code: mocks.requestCode,
-        save_pairing: mocks.save,
-        cancel_pairing: mocks.cancel,
-        detect_mac: mocks.detect,
-        update_pc: mocks.update,
-        delete_pc: mocks.remove,
-        start: mocks.start,
-        stop: mocks.stop,
-        set_attention: mocks.attention,
+        [RPC_METHODS.watchSnapshot]: mocks.watch,
+        [RPC_METHODS.fetchSettings]: mocks.settings,
+        [RPC_METHODS.beginPairing]: mocks.begin,
+        [RPC_METHODS.requestPairingCode]: mocks.requestCode,
+        [RPC_METHODS.savePairing]: mocks.save,
+        [RPC_METHODS.cancelPairing]: mocks.cancel,
+        [RPC_METHODS.detectMac]: mocks.detect,
+        [RPC_METHODS.updatePc]: mocks.update,
+        [RPC_METHODS.deletePc]: mocks.remove,
+        [RPC_METHODS.startPc]: mocks.start,
+        [RPC_METHODS.stopPc]: mocks.stop,
+        [RPC_METHODS.setAttention]: mocks.attention,
       } as Record<string, ReturnType<typeof vi.fn>>
     )[route];
   },
@@ -139,17 +142,20 @@ export const deckyUi = {
     inlineWrap?: string;
     focusable?: boolean;
     icon?: ReactNode;
-  } & PropsWithChildren) => (
-    <div data-field="">
-      {label && (
-        <label>
-          {label}
-          {children}
-        </label>
-      )}
-      {description && <small>{description}</small>}
-    </div>
-  ),
+  } & PropsWithChildren) => {
+    mocks.fieldRender(label);
+    return (
+      <div data-field="">
+        {label && (
+          <label>
+            {label}
+            {children}
+          </label>
+        )}
+        {description && <small>{description}</small>}
+      </div>
+    );
+  },
   PanelSection: ({
     title,
     children,
@@ -275,5 +281,6 @@ export function resetDeckyMocks() {
   mocks.navigateBack.mockReset();
   mocks.modal.mockReset().mockImplementation(() => ({ Close: vi.fn() }));
   mocks.toast.mockReset();
+  mocks.fieldRender.mockReset();
   vi.restoreAllMocks();
 }

@@ -75,6 +75,10 @@ impl RegistryConfig {
     }
 
     /// Revokes the credential `token` authenticates, if any.
+    pub fn is_full(&self) -> bool {
+        self.paired_devices.len() >= MAX_PAIRED_DEVICES
+    }
+
     pub fn revoke_token(&mut self, token: &str) -> bool {
         self.device_index(token)
             .map(|index| self.paired_devices.remove(index))

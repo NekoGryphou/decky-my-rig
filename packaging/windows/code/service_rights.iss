@@ -1,5 +1,5 @@
-// Returns Sddl with the managers' allow ACE, unchanged when Windows already
-// lists it; the ACE goes before any SACL part.
+// - Returns Sddl with the managers' allow ACE, unchanged when Windows already
+//   lists it; the ACE goes before any SACL part.
 function WithManagerAce(Sddl, GroupSid: String): String;
 var
   Ace: String;

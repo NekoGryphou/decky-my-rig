@@ -19,3 +19,5 @@ pub(super) const NOT_PAIRED: &str = "not paired any more; pair again";
 pub(super) const IDENTITY_CHANGED: &str = "identity changed; pair again";
 pub(super) const INCOMPATIBLE: &str = "incompatible; update My Rig";
 pub(super) const UNREACHABLE_PREFIX: &str = "PC is unreachable";
+pub(super) const SHUTDOWN_STUCK: &str =
+    "A save is still waiting for another process to release the PC configuration.";

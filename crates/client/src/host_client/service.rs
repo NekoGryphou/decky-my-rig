@@ -25,6 +25,17 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 impl HostClient {
+    /// The client for a saved PC, with the status deadline.
+    pub fn for_pc(pc: &crate::store::PcConfig) -> Self {
+        Self::new(
+            pc.host,
+            pc.port,
+            Some(pc.authentication.token.to_string()),
+            Some(pc.authentication.tls_pin),
+            super::consts::STATUS_DEADLINE,
+        )
+    }
+
     /// `deadline` bounds each whole request: connect, handshake and reply.
     pub fn new(
         host: Ipv4Addr,
@@ -42,8 +53,8 @@ impl HostClient {
     }
 
     pub async fn status(&self) -> Result<Status, HostError> {
-        // ? Parsing only accepts online and shutting_down. Any other state would
-        //   leave the device polling a PC it can't make sense of.
+        // ? Parsing only accepts online and shutting_down. Any other state would leave the device
+        // ? polling a PC it can't make sense of.
         let reply: StatusReply = self.call(Method::GET, STATUS_PATH, None, 200).await?;
         Ok(Status {
             host_id: normalize_uuid(&reply.host_id).map_err(|_| HostError::Invalid)?,
@@ -155,8 +166,7 @@ impl HostClient {
             .with_custom_certificate_verifier(verifier.clone())
             .with_no_client_auth();
         config.alpn_protocols = vec![ALPN.to_vec()];
-        // ! Session resumption would skip the pin check, so every request does a
-        //   full handshake.
+        // ! Session resumption would skip the pin check, so every request does a full handshake.
         config.resumption = Resumption::disabled();
         let server_name = ServerName::IpAddress((*self.address.ip()).into());
         let stream = match TlsConnector::from(Arc::new(config))

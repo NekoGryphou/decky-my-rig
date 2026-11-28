@@ -64,8 +64,8 @@ begin
   end;
 end;
 
-// Adds Sid to the managers recorded under RootKey\SubKey, once. The service
-// grants a recorded user only while they stay in My Rig Managers.
+// - Adds Sid to the managers recorded under RootKey\SubKey, once. The service
+//   grants a recorded user only while they stay in My Rig Managers.
 procedure RecordManagerUser(RootKey: Integer; SubKey, Sid: String);
 var
   Users: String;
@@ -78,7 +78,7 @@ begin
     RaiseException(ManagerOwnershipUnrecorded);
 end;
 
-// Removes only a group this installer created; an already-deleted group is fine.
+// - Removes only a group this installer created; an already-deleted group is fine.
 procedure RemoveManagerGroup;
 begin
   RegDeleteValue(HKLM, OwnershipKey, ManagerUsersValue);

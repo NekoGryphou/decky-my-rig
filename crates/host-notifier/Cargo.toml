@@ -17,3 +17,7 @@ notify-rust.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# * The paused clock lets the timeout tests run without waiting in real time.
+tokio = { workspace = true, features = ["test-util"] }

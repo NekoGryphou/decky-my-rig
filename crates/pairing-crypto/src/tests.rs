@@ -3,7 +3,7 @@ use super::*;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientLoginStartResult, CredentialRequest,
 };
-use rand::rngs::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 
 const CODE: &[u8] = b"12345678";
 const CERTIFICATE: &[u8] = b"fixture certificate DER";
@@ -22,7 +22,7 @@ fn confirm(
     client
         .state
         .finish(
-            &mut OsRng,
+            &mut UnwrapErr(SysRng),
             code,
             decode_response(&challenge.response).ok()?,
             ClientLoginFinishParameters::new(Some(context), ids, Some(&ksf)),
@@ -34,7 +34,7 @@ fn confirm(
 /// Whether the host session authenticates a client with this view.
 fn authenticates(code: &[u8], certificate: &[u8], nonce: &[u8; 32], ids: Identifiers<'_>) -> bool {
     let mut session = ApprovedSession::prepare(CODE, &NONCE, CERTIFICATE).unwrap();
-    let client = ClientLogin::<Suite>::start(&mut OsRng, code).unwrap();
+    let client = ClientLogin::<Suite>::start(&mut UnwrapErr(SysRng), code).unwrap();
     let challenge = session.start(&client.message.serialize()).unwrap();
     let context = context(certificate, nonce);
     let Some(confirmation) = confirm(client, &challenge, code, &context, ids) else {
@@ -84,8 +84,8 @@ fn malformed_wire_messages_rejected() {
         assert!(decode_finalization(bytes).is_err());
         assert!(decode_response(bytes).is_err());
     }
-    // ? The library's finalization parsing accepts trailing bytes, so test our
-    //   strict check directly with an otherwise valid MAC frame.
+    // ? The library's finalization parsing accepts trailing bytes, so test our strict check
+    // ? directly with an otherwise valid MAC frame.
     assert!(decode_finalization(&[0; 64]).is_ok());
     assert!(decode_finalization(&[0; 65]).is_err());
     assert!(decode_finalization(&[0; 63]).is_err());
@@ -95,11 +95,11 @@ fn malformed_wire_messages_rejected() {
 fn finalization_from_previous_exchange_rejected() {
     let mut session = ApprovedSession::prepare(CODE, &NONCE, CERTIFICATE).unwrap();
     let context = context(CERTIFICATE, &NONCE);
-    let first = ClientLogin::<Suite>::start(&mut OsRng, CODE).unwrap();
+    let first = ClientLogin::<Suite>::start(&mut UnwrapErr(SysRng), CODE).unwrap();
     let first_challenge = session.start(&first.message.serialize()).unwrap();
     let stale = confirm(first, &first_challenge, CODE, &context, identities()).unwrap();
     assert!(session.finish(first_challenge.attempt, &[0; 64]).is_err());
-    let second = ClientLogin::<Suite>::start(&mut OsRng, CODE).unwrap();
+    let second = ClientLogin::<Suite>::start(&mut UnwrapErr(SysRng), CODE).unwrap();
     let second_challenge = session.start(&second.message.serialize()).unwrap();
     assert!(session.finish(second_challenge.attempt, &stale).is_err());
 }

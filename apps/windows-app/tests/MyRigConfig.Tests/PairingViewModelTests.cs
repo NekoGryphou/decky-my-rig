@@ -1,3 +1,4 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using MyRigConfig.Shared;
 using System.Text;
 using System.Text.Json;
@@ -29,6 +30,44 @@ public sealed class PairingViewModelTests
         var close = peer.Requests.Single(r => r.GetProperty("operation").GetString() == "close_pairing");
         CollectionAssert.AreEquivalent(new[] { "version", "operation", "host_id" }, close.EnumerateObject().Select(p => p.Name).ToArray());
         Assert.AreEqual(peer.HostId.ToString("D"), close.GetProperty("host_id").GetString());
+    }
+
+    [TestMethod]
+    public async Task APairedDeviceEndsTheCodeShowsFeedbackAndLeavesNothingToClose()
+    {
+        var peer = new Peer();
+        var model = peer.Model();
+        var paired = 0;
+        model.Paired += (_, _) => paired++;
+        await model.StartAsync(CancellationToken.None);
+        await model.CreateCodeAsync(CancellationToken.None);
+        peer.Devices.Add((TestHost.DeviceIdText, PairingMessages.DefaultDeviceName));
+        for (var tick = 0; tick < PairingConstants.PollEveryTicks; tick++) await model.TickAsync(CancellationToken.None);
+        Assert.AreEqual(1, paired);
+        Assert.AreEqual("", model.CodeText);
+        Assert.AreEqual(PairingMessages.Paired(PairingMessages.DefaultDeviceName), peer.Host.FeedbackMessage);
+        Assert.AreEqual(MessageTone.Success, peer.Host.FeedbackSeverity);
+        await model.CloseAsync();
+        await peer.Host.RetireAsync();
+        Assert.IsFalse(peer.Requests.Any(r => r.GetProperty("operation").GetString() == "close_pairing"),
+            "the host already used up the code");
+    }
+
+    [TestMethod]
+    public async Task ADeviceThatWasAlreadyPairedDoesNotCompleteThePairing()
+    {
+        var peer = new Peer();
+        peer.Devices.Add((TestHost.DeviceIdText, PairingMessages.DefaultDeviceName));
+        var model = peer.Model();
+        var paired = 0;
+        model.Paired += (_, _) => paired++;
+        await peer.Host.RefreshCommand.ExecuteAsync(null);
+        await model.StartAsync(CancellationToken.None);
+        await model.CreateCodeAsync(CancellationToken.None);
+        for (var tick = 0; tick < PairingConstants.PollEveryTicks * 2; tick++) await model.TickAsync(CancellationToken.None);
+        Assert.AreEqual(0, paired);
+        Assert.AreEqual(PairingStep.Code, model.Step);
+        await model.CloseAsync();
     }
 
     [TestMethod]
@@ -119,7 +158,7 @@ public sealed class PairingViewModelTests
         var peer = new Peer();
         var model = peer.Model();
         await model.StartAsync(CancellationToken.None);
-        peer.HostId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        peer.HostId = TestHost.DeviceId;
         await model.CreateCodeAsync(CancellationToken.None);
         Assert.AreEqual(PairingStep.Failed, model.Step);
         await model.CreateCodeAsync(CancellationToken.None);
@@ -246,29 +285,22 @@ public sealed class PairingViewModelTests
         Assert.IsFalse(peer.Host.IsInteracting);
     }
 
-    private sealed class ClockProvider : TimeProvider
-    {
-        private long now;
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() => now;
-        internal void Advance(TimeSpan duration) => now += duration.Ticks;
-    }
-
     private sealed class Peer
     {
-        internal Guid HostId { get; set; } = Guid.Parse("03c85317-9d93-4fb3-a04b-91a0e16668c6");
+        internal Guid HostId { get; set; } = TestHost.Id;
         internal bool FailList { get; set; }
         internal bool FailClose { get; set; }
         internal bool RejectOpen { get; set; }
         internal Func<CancellationToken, Task>? Open { get; set; }
         internal Func<CancellationToken, Task>? Observe { get; set; }
+        internal List<(string Id, string Name)> Devices { get; } = [];
         internal List<JsonElement> Requests { get; } = [];
-        internal ClockProvider Clock { get; } = new();
+        internal FakeClock Clock { get; } = new();
         internal HostViewModel Host { get; }
 
         internal Peer()
         {
-            var client = new HostControlClient(async (request, sending, token) =>
+            var client = new HostControlClientService(async (request, sending, token) =>
             {
                 sending();
                 using var document = JsonDocument.Parse(request);
@@ -283,18 +315,17 @@ public sealed class PairingViewModelTests
                     return Encoding.UTF8.GetBytes("{\"version\":1,\"ok\":false,\"error\":\"unavailable\"}");
                 var reply = operation switch
                 {
-                    "list" => $"{{{envelope},\"paired_devices\":[]}}",
+                    "list" => $"{{{envelope},\"paired_devices\":[{string.Join(',', Devices.Select(d => $"{{\"device_id\":\"{d.Id}\",\"name\":\"{d.Name}\"}}"))}]}}",
                     "open_pairing" => $"{{{envelope},\"code\":\"00123456\",\"expires_in_seconds\":120}}",
                     "close_pairing" => $"{{{envelope}}}",
                     _ => throw new InvalidOperationException("Unexpected fixture request."),
                 };
                 return Encoding.UTF8.GetBytes(reply);
             });
-            Host = new HostViewModel(client, async token =>
+            Host = TestHost.Model(client, async token =>
             {
                 if (Observe is { } observe) await observe(token);
-                return new HostObservation(ServiceState.Running,
-                    new HostStatus(49000, true, "listening"), null);
+                return new HostObservation(ServiceState.Running, TestHost.Status(49000, testMode: true), null);
             }, Clock);
         }
 

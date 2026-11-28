@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MyRigConfig.Core.Host;
 
 namespace MyRigConfig.Tests;
 
@@ -44,7 +45,7 @@ internal sealed class PortUiContext : SynchronizationContext, IDisposable
     }
 }
 
-internal sealed class BlockingPortLookup : IDisposable
+internal sealed class BlockingPortLookup : IPortProbe, IDisposable
 {
     private readonly Lock sync = new();
     private readonly ManualResetEventSlim release = new();
@@ -54,7 +55,8 @@ internal sealed class BlockingPortLookup : IDisposable
     internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal int Maximum { get { lock (sync) return maximum; } }
     internal int[] Queries { get { lock (sync) return queries.ToArray(); } }
-    internal int? Find(int port)
+    public string? ProcessName(int processId) => null;
+    public int? FindListener(int port, int? excludedProcessId)
     {
         lock (sync) { queries.Add(port); maximum = Math.Max(maximum, ++active); }
         try

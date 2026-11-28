@@ -37,4 +37,7 @@ pub enum PairRequestError {
 pub enum PairingRefusal {
     Busy,
     Unavailable,
+    /// The registry has no room for another device. Not a secret, and the
+    /// code stays usable once the owner removes a device.
+    DeviceLimit,
 }

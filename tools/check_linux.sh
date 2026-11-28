@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every check that runs on Linux; CI runs exactly this.
+# - Every check that runs on Linux; CI runs exactly this.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,13 +22,24 @@ need_command cc "install a C compiler (Debian/Ubuntu: sudo apt install build-ess
 need_command cargo-deny "cargo install cargo-deny --locked"
 need_command cargo-machete "cargo install cargo-machete --locked"
 need_command betterleaks "download from https://github.com/betterleaks/betterleaks/releases"
+need_command shellcheck "sudo apt install shellcheck"
 need_command openssl "install OpenSSL; the integration tests make TLS identities with it"
 need_command pnpm "install Node.js 22.12 or newer (CI uses 24), then npm install --global pnpm@12.2.1"
 need_path "$repo_root/node_modules" "plugin packages" "pnpm install --frozen-lockfile"
 need_path "$repo_root/out/quality-venv/bin/mypy" "ruff and mypy" "bash tools/bootstrap_quality.sh"
 report_missing
 
-betterleaks git "$repo_root" --config "$repo_root/tools/betterleaks.toml" --no-banner --log-level warn
+# * The backend image builds with its own Rust version. It must match the toolchain every check
+# * uses.
+toolchain_channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' "$repo_root/rust-toolchain.toml")"
+if ! grep -q "^FROM rust:${toolchain_channel}-" "$repo_root/backend/Dockerfile"; then
+    echo "backend/Dockerfile must build from rust:${toolchain_channel} (rust-toolchain.toml)." >&2
+    exit 1
+fi
+
+# - Every tracked shell script, checked the same way in CI and on the PC.
+git -C "$repo_root" ls-files -z -- '*.sh' | xargs -0 shellcheck
+betterleaks git "$repo_root" --config "$repo_root/tools/betterleaks.toml" --no-banner --log-level warn --redact
 # * The plugin adapter's tests also drive the real agent binary.
 cargo build --manifest-path "$repo_root/Cargo.toml" --locked -p myrig-cli --bin myrig
 MYRIG_BINARY="$CARGO_TARGET_DIR/debug/myrig" python3 -m unittest discover -s "$repo_root/tests/plugin" -q
@@ -36,7 +47,8 @@ MYRIG_BINARY="$CARGO_TARGET_DIR/debug/myrig" python3 -m unittest discover -s "$r
 python_sources=("$repo_root/main.py" "$repo_root/py_modules")
 "$repo_root/out/quality-venv/bin/ruff" check "${python_sources[@]}" "$repo_root/tests/integration"
 "$repo_root/out/quality-venv/bin/ruff" format --check "${python_sources[@]}" "$repo_root/tests/integration"
-# ? The integration tests import their helpers as top-level modules, so their folder goes on mypy's path.
+# ? The integration tests import their helpers as top-level modules, so their folder goes on mypy's
+# ? path.
 MYPYPATH="$repo_root/py_modules:$repo_root/tests/integration" \
     "$repo_root/out/quality-venv/bin/mypy" --config-file "$repo_root/pyproject.toml" "${python_sources[@]}"
 MYPYPATH="$repo_root/py_modules:$repo_root/tests/integration" \
@@ -63,8 +75,8 @@ cargo test --manifest-path "$repo_root/Cargo.toml" --locked --workspace --all-fe
 cargo clippy --manifest-path "$repo_root/Cargo.toml" --locked --workspace --all-features --all-targets -- -D warnings
 cargo deny --manifest-path "$repo_root/Cargo.toml" check
 cargo deny --manifest-path "$repo_root/fuzz/Cargo.toml" check
-# ! The fuzz targets have to build with the crate versions releases ship, so every
-#   crate both lock files name needs a version the workspace lock also has.
+# ! The fuzz targets have to build with the crate versions releases ship, so every crate both lock
+# ! files name needs a version the workspace lock also has.
 drift="$(awk 'FNR == 1 { file++; name = "" }
     /^name = / { gsub(/"/, "", $3); name = $3 }
     /^version = / { gsub(/"/, "", $3); if (name == "") next
@@ -73,8 +85,8 @@ drift="$(awk 'FNR == 1 { file++; name = "" }
     "$repo_root/Cargo.lock" "$repo_root/fuzz/Cargo.lock")"
 [[ -z "$drift" ]] || { printf 'fuzz/Cargo.lock differs from Cargo.lock:\n%s\n' "$drift" >&2; exit 1; }
 cargo machete "$repo_root/crates"
-# ! The host CLI and the notifier reach the service only through the pipe, so neither
-#   may link the host core (TLS, pairing crypto).
+# ! The host CLI and the notifier reach the service only through the pipe, so neither may link the
+# ! host core (TLS, pairing crypto).
 for client in myrig-host myrig-notifier; do
     if cargo tree --manifest-path "$repo_root/Cargo.toml" --locked -p "$client" -e normal \
         --target x86_64-pc-windows-msvc -i myrig-host-core > /dev/null 2>&1; then
@@ -83,9 +95,8 @@ for client in myrig-host myrig-notifier; do
     fi
 done
 
-# ? Build the harness here, the way tests/integration/host_fixtures.py runs it.
-#   Compiling it inside the harness's 60 s startup wait would make the first test
-#   flaky.
+# ? Build the harness here, the way tests/integration/host_fixtures.py runs it. Compiling it inside
+# ? the harness's 60 s startup wait would make the first test flaky.
 cargo test --manifest-path "$repo_root/Cargo.toml" --locked --quiet -p myrig-host-core --test http_harness --no-run
 python3 -m unittest discover -s "$repo_root/tests/integration" -q
 

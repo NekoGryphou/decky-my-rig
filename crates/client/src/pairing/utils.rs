@@ -17,7 +17,7 @@ pub fn device_name(platform: &dyn Platform) -> String {
     device_name_from(&platform.hostname().unwrap_or_default())
 }
 
-pub fn device_name_from(hostname: &str) -> String {
+pub(crate) fn device_name_from(hostname: &str) -> String {
     let hostname = hostname.strip_suffix('\n').unwrap_or(hostname);
     match normalize_name(hostname) {
         Ok(name) if name == hostname => name,

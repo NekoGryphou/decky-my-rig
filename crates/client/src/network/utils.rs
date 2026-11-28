@@ -49,9 +49,8 @@ pub(super) fn select_directed_broadcast(
         .filter(|interface| USABLE_PREFIXES.contains(&interface.prefix))
         .filter(|interface| usable_unicast(target) && is_host(target, *interface))
         .collect();
-    // ? Interfaces with the longest prefix that contain the PC are on its subnet,
-    //   so they share one broadcast address (Ethernet and Wi-Fi on a docked
-    //   Deck). We send from the lowest address.
+    // ? Interfaces with the longest prefix that contain the PC are on its subnet, so they share one
+    // ? broadcast address (Ethernet and Wi-Fi on a docked Deck). We send from the lowest address.
     let best = candidates
         .iter()
         .map(|interface| interface.prefix)

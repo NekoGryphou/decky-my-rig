@@ -34,7 +34,7 @@ public partial class RenameDialogViewModel : ObservableObject
     partial void OnNameChanged(string value)
     {
         ChosenName = value.Trim();
-        var valid = LocalControlProtocol.IsValidName(ChosenName);
+        var valid = LocalControlProtocolService.IsValidName(ChosenName);
         Error = valid ? "" : SharedMessages.InvalidDeviceName;
         CanSave = valid && !string.Equals(ChosenName, currentName, StringComparison.Ordinal);
     }

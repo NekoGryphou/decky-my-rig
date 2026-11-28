@@ -64,7 +64,7 @@ fn open_pairing_reply_yields_only_an_eight_digit_code() {
 
 #[test]
 fn event_batch_keeps_the_host_id() {
-    let reply = br#"{"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","baseline_sequence":0,"events":[{"sequence":1,"kind":"pairing_request","device_name":"steamdeck","time_unix":1}]}"#;
+    let reply = br#"{"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","epoch":"test-epoch","baseline_sequence":0,"closed":false,"events":[{"sequence":1,"kind":"pairing_request","device_name":"steamdeck","time_unix":1}]}"#;
     let batch = parse::<WaitReply>(reply).unwrap();
     assert_eq!(batch.host_id, HOST);
     assert_eq!(batch.baseline_sequence, 0);
@@ -76,7 +76,7 @@ fn event_batch_keeps_the_host_id() {
 
 #[test]
 fn unordered_events_are_refused() {
-    let reply = br#"{"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","baseline_sequence":0,"events":[{"sequence":2,"kind":"pairing_request","device_name":"a","time_unix":1},{"sequence":2,"kind":"pairing_request","device_name":"b","time_unix":1}]}"#;
+    let reply = br#"{"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","epoch":"test-epoch","baseline_sequence":0,"closed":false,"events":[{"sequence":2,"kind":"pairing_request","device_name":"a","time_unix":1},{"sequence":2,"kind":"pairing_request","device_name":"b","time_unix":1}]}"#;
     assert_eq!(parse::<WaitReply>(reply).err(), Some(ReplyError::Invalid));
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Linux CLI archives into out/release.
+# - Builds the Linux CLI archives into out/release.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,12 +15,14 @@ need_command cc "install a C compiler (Debian/Ubuntu: sudo apt install build-ess
 need_command clang "install clang for the aarch64 build (Debian/Ubuntu: sudo apt install clang)"
 report_missing
 
-version="$(cat "$repo_root/VERSION")"
+version="$(sed -n '/^\[workspace.package\]/,/^version/{s/^version = "\(.*\)"/\1/p}' "$repo_root/Cargo.toml")"
 release="$repo_root/out/release"
 mkdir -p "$release"
 for arch in x86_64 aarch64; do
     cargo build --manifest-path "$repo_root/Cargo.toml" --locked --release -p myrig-cli \
         --target "$arch-unknown-linux-musl"
+    # ? The plugin build refuses an agent that has no stamp of its inputs.
+    cargo xtask stamp "$CARGO_TARGET_DIR/$arch-unknown-linux-musl/release/myrig"
     tar -czf "$release/myrig-cli-v$version-$arch-linux.tar.gz" \
         -C "$CARGO_TARGET_DIR/$arch-unknown-linux-musl/release" myrig
 done

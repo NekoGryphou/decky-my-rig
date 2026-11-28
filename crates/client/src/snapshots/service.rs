@@ -61,8 +61,8 @@ impl Snapshots {
             {
                 return Ok(frame.clone());
             }
-            // ? The sender lives as long as `self`, so this can't fail while
-            //   anyone can still call `watch`.
+            // ? The sender lives as long as `self`, so this can't fail while anyone can still call
+            // ? `watch`.
             if receiver.changed().await.is_err() {
                 return Err(PublicError(INVALID_REVISION));
             }

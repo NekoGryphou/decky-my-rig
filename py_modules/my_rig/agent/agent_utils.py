@@ -17,3 +17,8 @@ def remove_saved_state(directory: Path) -> None:
         shutil.rmtree(directory)
     except FileNotFoundError:
         pass
+
+
+def printable_line(text: str, limit: int) -> str:
+    """`text` without control characters, cut to `limit` characters."""
+    return "".join(character for character in text if character.isprintable())[:limit]

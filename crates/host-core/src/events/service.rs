@@ -59,6 +59,10 @@ impl HostEvents {
         state.events.back().map_or(0, |event| event.sequence)
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.state().closed
+    }
+
     fn state(&self) -> MutexGuard<'_, State> {
         self.0
             .state
@@ -83,8 +87,7 @@ impl HostEvents {
         loop {
             let changed = self.0.changed.notified();
             tokio::pin!(changed);
-            // ! Register before checking, so an event that lands in between still
-            //   wakes us.
+            // ! Register before checking, so an event that lands in between still wakes us.
             changed.as_mut().enable();
             {
                 let state = self.state();

@@ -11,6 +11,8 @@ internal static class LocalControlConstants
     // ! Same as the host's MAX_PAIRED_DEVICES (crates/host-core/src/paired_devices/consts.rs).
     internal const int MaxPairedDevices = 16;
     internal const uint PipeWaitMilliseconds = 2000;
+    internal const string ListenerListening = "listening";
+    internal const string ListenerUnavailableState = "unavailable";
     internal const string UnauthorizedError = "unauthorized";
     internal static readonly TimeSpan ExchangeDeadline = TimeSpan.FromSeconds(10);
     internal const string PipePath = @"\\.\pipe\MyRigHost.Control.v1";
@@ -21,10 +23,9 @@ internal static class LocalControlConstants
         "recovery_required", "unavailable", "control_failed"
     };
 
-    /// <summary>Characters a name can't contain besides control characters, as inclusive code point
-    /// ranges: every format character (Cf, Unicode 16), the line and paragraph separators, and the
-    /// blank Hangul fillers. The service has the same list (<c>INVISIBLE</c> in crates/protocol),
-    /// and the shared names.json fixture checks both.</summary>
+    /// <summary>Code point ranges a name can't contain besides control characters: all Cf format
+    /// characters (Unicode 16), the line and paragraph separators, and the blank Hangul fillers.
+    /// Must match <c>INVISIBLE</c> in crates/protocol; the shared names.json fixture checks both.</summary>
     internal static readonly (int First, int Last)[] InvisibleRanges =
     [
         (0x00AD, 0x00AD),
@@ -53,6 +54,7 @@ internal static class LocalControlConstants
         (0xE0020, 0xE007F),
     ];
 
+    internal const int MaxNameLength = 80;
     internal const int MinSettablePort = 1024;
     internal const int MaxPort = 65535;
 }

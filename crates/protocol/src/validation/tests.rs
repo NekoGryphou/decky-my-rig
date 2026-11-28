@@ -23,8 +23,7 @@ fn names_are_trimmed_bounded_visible_text() {
 
 #[test]
 fn the_shared_name_fixture_holds_on_this_side() {
-    // ! The Windows app reads the same file, so both sides have to agree on every
-    //   name.
+    // ! The Windows app reads the same file, so both sides have to agree on every name.
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../tests/fixtures/local-control/names.json"
     ))

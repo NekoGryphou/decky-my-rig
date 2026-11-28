@@ -3,13 +3,13 @@ use super::*;
 use crate::decode_response;
 use crate::{Suite, context, identities, stretch};
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters};
-use rand::rngs::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use std::time::{Duration, Instant};
 fn session() -> ApprovedSession {
     ApprovedSession::prepare(b"12345678", &[1; 32], b"certificate").unwrap()
 }
 fn client(code: &[u8]) -> opaque_ke::ClientLoginStartResult<Suite> {
-    ClientLogin::<Suite>::start(&mut OsRng, code).unwrap()
+    ClientLogin::<Suite>::start(&mut UnwrapErr(SysRng), code).unwrap()
 }
 fn confirmation(
     c: opaque_ke::ClientLoginStartResult<Suite>,
@@ -20,7 +20,7 @@ fn confirmation(
     let ksf = stretch();
     c.state
         .finish(
-            &mut OsRng,
+            &mut UnwrapErr(SysRng),
             b"12345678",
             decode_response(&ch.response)?,
             ClientLoginFinishParameters::new(Some(&ctx), identities(), Some(&ksf)),
@@ -28,6 +28,7 @@ fn confirmation(
         .map(|r| r.message.serialize().to_vec())
         .map_err(|_| ())
 }
+use subtle::ConstantTimeEq;
 #[test]
 fn success_one_shot_stale_and_replay() {
     let mut s = session();
@@ -99,7 +100,11 @@ fn expiry_boundaries_and_stale_id() {
         s.finish(old.attempt, &[0; 64]),
         Err(Error::StaleAttempt)
     ));
-    assert!(s.exchange.as_ref().is_some_and(|e| e.id == new.attempt));
+    assert!(
+        s.exchange
+            .as_ref()
+            .is_some_and(|e| bool::from(e.id.ct_eq(&new.attempt)))
+    );
     s.until = now + Duration::from_secs(16);
     assert!(matches!(
         s.finish_at(new.attempt, &[0; 64], s.until),
@@ -115,7 +120,7 @@ fn replay_rejection_and_clamped_last_attempt() {
     assert!(s.finish(first.attempt, &[0; 64]).is_err());
     let c = client(b"12345678");
     let second = s.start(&c.message.serialize()).unwrap();
-    assert!(first.attempt != second.attempt);
+    assert!(!bool::from(first.attempt.ct_eq(&second.attempt)));
     assert!(matches!(
         s.finish(first.attempt, &replay),
         Err(Error::StaleAttempt)
@@ -133,4 +138,13 @@ fn replay_rejection_and_clamped_last_attempt() {
         s.finish_at(last.attempt, &[0; 64], s.until),
         Err(Error::Closed)
     ));
+}
+
+#[test]
+fn attempt_ids_compare_in_constant_time_and_still_tell_ids_apart() {
+    let a = AttemptId::from_bytes([1; 32]);
+    let mut other = [1; 32];
+    other[31] = 2;
+    assert!(bool::from(a.ct_eq(&AttemptId::from_bytes([1; 32]))));
+    assert!(!bool::from(a.ct_eq(&AttemptId::from_bytes(other))));
 }

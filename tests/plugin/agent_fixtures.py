@@ -24,6 +24,30 @@ if MODE == "noisy":
     # - An error line over the limit, then an ordinary one.
     print("y" * 200, file=sys.stderr, flush=True)
     print("after the long line", file=sys.stderr, flush=True)
+if MODE == "wedge":
+    # - Alive but silent after the first snapshot: only a timeout can notice.
+    print(
+        json.dumps(
+            {
+                "event": "snapshot",
+                "frame": {
+                    "revision": 1,
+                    "pcs": [],
+                    "test_stops": {"count": 0, "name": None},
+                    "closed": False,
+                    "refreshed": False,
+                },
+            }
+        ),
+        flush=True,
+    )
+    if MARKER is not None and not MARKER.exists():
+        MARKER.touch()
+        sys.stdin.readline()
+        time.sleep(30)
+if MODE == "loud":
+    # - One long error line with control characters inside.
+    print("a\x1b[31mb\x00" + "z" * 5000, file=sys.stderr, flush=True)
 if MODE == "linger":
     # - Ignores stdin EOF, like an agent that hangs on exit.
     sys.stdin.read()

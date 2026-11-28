@@ -7,6 +7,7 @@ mod windows_notifier {
     use auto_launch::{AutoLaunchBuilder, WindowsEnableMode};
     use myrig_host_windows::{
         control_client::control_pipe_name,
+        event_log::report_notifier_failure,
         notification_identity::{
             NOTIFIER_APP_ID, NOTIFIER_DISPLAY_NAME, NOTIFIER_INSTANCE, register, unregister,
         },
@@ -21,15 +22,20 @@ mod windows_notifier {
     use notify_rust::Notification;
     use std::{io, process::ExitCode};
 
-    /// Adds or removes this user's login entry for the notifier.
-    fn configure(command: Command) -> Result<(), &'static str> {
+    /// This user's login entry for the notifier.
+    fn login_entry() -> Result<auto_launch::AutoLaunch, &'static str> {
         let path = launch_path()?;
-        let auto = AutoLaunchBuilder::new()
+        AutoLaunchBuilder::new()
             .set_app_name(APP_NAME)
             .set_app_path(&path)
             .set_windows_enable_mode(WindowsEnableMode::CurrentUser)
             .build()
-            .map_err(|_| CANNOT_CONFIGURE)?;
+            .map_err(|_| CANNOT_CONFIGURE)
+    }
+
+    /// Adds or removes this user's login entry for the notifier.
+    fn configure(command: Command) -> Result<(), &'static str> {
+        let auto = login_entry()?;
         match command {
             Command::Enable => auto.enable(),
             Command::Disable => auto.disable(),
@@ -50,8 +56,7 @@ mod windows_notifier {
             is_console_session()
         }
 
-        // ? The notifier has no console, so the refusal is shown as a
-        //   notification.
+        // ? The notifier has no console, so the refusal is shown as a notification.
         fn unauthorized(&self) {
             self.notify(
                 myrig_notifier::listener::UNAUTHORIZED_TITLE,
@@ -63,7 +68,7 @@ mod windows_notifier {
             let mut notice = Notification::new();
             notice.summary(title).body(body).app_id(NOTIFIER_APP_ID);
             if let Err(error) = notice.show() {
-                eprintln!("My Rig notification failed: {error}");
+                report_notifier_failure("show a notification", &error.to_string());
             }
         }
     }
@@ -88,6 +93,12 @@ mod windows_notifier {
                     Ok(None) => return ExitCode::SUCCESS,
                     Err(_) => return ExitCode::FAILURE,
                 };
+                // ! Windows shows a toast only for a registered app identity. The login entry can
+                // ! be added without it, so every start registers it. The login entry is left
+                // ! alone: only the flags change it, so a disabled entry stays disabled.
+                if let Err(error) = register(NOTIFIER_APP_ID, NOTIFIER_DISPLAY_NAME) {
+                    report_notifier_failure("register its notifications", error);
+                }
                 run(connect, &SystemNotifier, tokio::time::sleep).await;
                 ExitCode::SUCCESS
             }
@@ -95,13 +106,13 @@ mod windows_notifier {
                 match notification_identity(&command).and_then(|()| configure(command)) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(error) => {
-                        eprintln!("{error}");
+                        report_notifier_failure("change its login entry", error);
                         ExitCode::FAILURE
                     }
                 }
             }
             Err(error) => {
-                eprintln!("{error}");
+                report_notifier_failure("read its command line", error);
                 ExitCode::FAILURE
             }
         }

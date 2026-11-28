@@ -24,7 +24,7 @@ $stage = Join-Path $repoRoot "out\build\windows-installer-$Arch"
 $payload = Join-Path $stage 'payload'
 $appOutput = Join-Path $payload 'App'
 $script = Join-Path $PSScriptRoot 'my_rig.iss'
-$version = (Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -Raw).Trim()
+$version = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'Cargo.toml')), '(?ms)^\[workspace\.package\].*?^version = "([^"]+)"').Groups[1].Value
 
 $binaries = @('myrig-service.exe', 'myrig-setup.exe', 'myrig-notifier.exe', 'myrig-host.exe')
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }

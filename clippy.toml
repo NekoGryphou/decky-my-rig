@@ -1,0 +1,3 @@
+# * Tests may unwrap and expect; production code states its invariant instead.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -85,3 +85,25 @@ fn load_security_refuses_missing_and_oversized() {
     .unwrap();
     assert!(load_security(dir.path(), host).is_err());
 }
+
+#[test]
+fn replace_reports_unreadable_file_as_io_not_conflict() {
+    // A file that cannot be read says nothing about its content, so it must not
+    // look like someone else changed it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("host.json");
+    fs::create_dir(&path).unwrap();
+    let store = FileStorage { path };
+    assert_eq!(store.replace(b"old", b"new"), Err(StorageError::Io));
+}
+
+#[test]
+fn opening_removes_a_temp_file_a_crashed_save_left_behind() {
+    // ! A save that crashes after creating its temp file leaves it in the folder. Nothing else uses
+    // ! that name, so opening the store removes it.
+    let (dir, _store) = store_with(b"old");
+    fs::write(dir.path().join(".tmpQx93Zk"), b"half written").unwrap();
+    let reopened = FileStorage::open(&dir.path().join("host.json")).unwrap();
+    assert_eq!(entries(dir.path()), ["host.json"]);
+    assert_eq!(reopened.read().unwrap(), b"old");
+}

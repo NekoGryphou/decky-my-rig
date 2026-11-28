@@ -55,6 +55,16 @@ pub(crate) async fn pairing_peer_busy_once(
     edit: Edit,
     busy: &[&'static str],
 ) -> PairingPeer {
+    spawn_peer(code, edit, busy, false).await
+}
+
+/// A peer whose every device slot is taken: the finish request gets 409 with
+/// `device_limit_reached`, as the host sends it.
+pub(crate) async fn pairing_peer_at_device_limit(code: &str) -> PairingPeer {
+    spawn_peer(code, unchanged, &[], true).await
+}
+
+async fn spawn_peer(code: &str, edit: Edit, busy: &[&'static str], at_limit: bool) -> PairingPeer {
     let busy = Arc::new(Mutex::new(busy.to_vec()));
     let identity = identity();
     let session = Arc::new(Mutex::new(
@@ -79,7 +89,13 @@ pub(crate) async fn pairing_peer_busy_once(
                 busy.retain(|busy| *busy != path);
                 held
             };
-            let (status, mut value) = if held {
+            let (status, mut value) = if at_limit && path == PAIR_FINISH_PATH {
+                (
+                    "409 Conflict",
+                    json!({"protocol_version":{"major":1,"minor":0},
+                        "error":{"code":"device_limit_reached","message":"Device limit reached."}}),
+                )
+            } else if held {
                 (
                     "503 Service Unavailable",
                     json!({"protocol_version":{"major":1,"minor":0},

@@ -1,7 +1,6 @@
-use super::utils::netmask;
+use super::utils::{fill_adapter_buffer, netmask};
 use std::{io, net::Ipv4Addr};
 use windows::Win32::{
-    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS},
     NetworkManagement::{
         IpHelper::{
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
@@ -16,29 +15,18 @@ use windows::Win32::{
 /// Address and netmask of every IPv4 address on an adapter that's up and isn't
 /// loopback, PPP or a tunnel.
 pub(crate) fn broadcast_interfaces() -> io::Result<Vec<(Ipv4Addr, Ipv4Addr)>> {
-    // ? u64 words keep the adapter records aligned.
-    let mut buffer: Vec<u64> = vec![0; 2048];
-    loop {
-        let mut size = (buffer.len() * 8) as u32;
+    let buffer = fill_adapter_buffer(|buffer, size| {
         // ! SAFETY: `buffer` holds `size` writable bytes, 8-byte aligned.
-        let result = unsafe {
+        unsafe {
             GetAdaptersAddresses(
                 u32::from(AF_INET.0),
                 GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
                 None,
                 Some(buffer.as_mut_ptr().cast()),
-                &mut size,
+                size,
             )
-        };
-        if result == ERROR_BUFFER_OVERFLOW.0 {
-            buffer = vec![0; (size as usize).div_ceil(8)];
-            continue;
         }
-        if result != ERROR_SUCCESS.0 {
-            return Err(io::Error::from_raw_os_error(result as i32));
-        }
-        break;
-    }
+    })?;
     let mut found = Vec::new();
     let mut adapter = buffer.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
     while !adapter.is_null() {

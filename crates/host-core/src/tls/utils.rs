@@ -8,8 +8,8 @@ pub(super) fn server_config_from_der(
     certificates: Vec<Vec<u8>>,
     pkcs8_key: Vec<u8>,
 ) -> Result<Arc<rustls::ServerConfig>, rustls::Error> {
-    // ! rustls-pki-types supports Zeroize, but its owned DER wrapper doesn't wipe
-    //   itself on drop. Keep this copy guarded while ring borrows it.
+    // ! rustls-pki-types supports Zeroize, but its owned DER wrapper doesn't wipe itself on drop.
+    // ! Keep this copy guarded while ring borrows it.
     let key = Zeroizing::new(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(pkcs8_key)));
     let signing_key = rustls::crypto::ring::sign::any_supported_type(&key)?;
     let certified_key = rustls::sign::CertifiedKey::new(

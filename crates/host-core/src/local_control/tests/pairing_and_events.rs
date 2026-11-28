@@ -6,7 +6,10 @@ use std::time::Duration;
 
 #[test]
 fn notifier_event_client_uses_shared_wire_contract() {
-    let request = client::encode(&client::ControlRequest::WaitEvents { after: 0 });
+    let request = client::encode(&client::ControlRequest::WaitEvents {
+        after: 0,
+        epoch: None,
+    });
     let expected: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/local-control/wait-events-request.json"
     ))
@@ -78,7 +81,8 @@ async fn secure_approval_checks_host_and_strict_inputs_before_callback() {
         let reply = execute_secure(&host, &bytes, host.pairing_approval(), |_| panic!("must not persist"), |_, _| async { panic!("must not approve") }).await;
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&reply).unwrap()["error"], expected);
     }
-    let reply = execute_secure(
+    // * The reply holds the pairing code, so its buffer is wiped when dropped.
+    let reply: zeroize::Zeroizing<Vec<u8>> = execute_secure(
         &host,
         &bytes,
         host.pairing_approval(),
@@ -109,7 +113,11 @@ async fn secure_approval_checks_host_and_strict_inputs_before_callback() {
             serde_json::from_slice::<serde_json::Value>(&reply).unwrap()["error"],
             "unavailable"
         );
-        assert!(!String::from_utf8(reply).unwrap().contains("private"));
+        assert!(
+            !String::from_utf8(reply.to_vec())
+                .unwrap()
+                .contains("private")
+        );
     }
 }
 
@@ -210,7 +218,7 @@ async fn close_invalidates_an_earlier_approval_queued_before_host_admission() {
                             "12345678",
                             [7; 32],
                             b"cert",
-                            [1; 32],
+                            &[1; 32],
                             uuid::Uuid::from_u128(3),
                             Arc::new(|_| Ok(())),
                         )
@@ -238,6 +246,31 @@ async fn close_invalidates_an_earlier_approval_queued_before_host_admission() {
     );
 }
 
+#[tokio::test]
+async fn wait_from_another_service_process_returns_every_event() {
+    // ! The cursor (3) is below the newest sequence (6), so only the epoch tells the host the
+    // ! caller last heard from another process. Without it, events 1-3 are left out.
+    let host = host();
+    for index in 0..6 {
+        host.events().record(
+            myrig_protocol::events::EventKind::TestShutdown,
+            format!("Device {index}"),
+        );
+    }
+    let request =
+        br#"{"version":1,"operation":"wait_events","after":3,"epoch":"an-older-process"}"#;
+    let response = execute_secure(
+        &host,
+        request,
+        host.pairing_approval(),
+        |_| panic!("wait must not save"),
+        |_, _| async { panic!("wait must not open pairing") },
+    )
+    .await;
+    let reply: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(reply["events"].as_array().unwrap().len(), 6);
+}
+
 #[test]
 fn event_wait_capacity_classification_requires_the_strict_v1_request() {
     assert!(super::super::utils::is_event_wait_request(
@@ -262,4 +295,27 @@ fn event_wait_capacity_classification_requires_the_strict_v1_request() {
     assert!(!super::super::utils::is_event_wait_request(
         oversized.as_bytes()
     ));
+}
+
+#[tokio::test]
+async fn wait_events_reports_a_closed_event_log() {
+    let host = host();
+    host.events().close();
+    let reply = execute_secure(
+        &host,
+        br#"{"version":1,"operation":"wait_events","after":0}"#,
+        host.pairing_approval(),
+        |_| panic!("wait must not save"),
+        |_, _| async { panic!("wait must not open pairing") },
+    )
+    .await;
+    let reply: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+    assert_eq!(reply["closed"], true);
+    let epoch = reply["epoch"].as_str().unwrap();
+    assert_eq!(epoch.len(), 32);
+    assert!(
+        epoch
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
 }

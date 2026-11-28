@@ -13,13 +13,26 @@ public sealed class HostPresentationTests
     [TestMethod]
     public void EqualDeviceNamesHaveDistinctStableRemoveIdentifiers()
     {
-        var first = new ManagedDeviceSummary(new PairedDeviceSummary(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Steam Deck"), NoCommand, NoCommand);
+        var first = new ManagedDeviceSummary(new PairedDeviceSummary(TestHost.DeviceId, "Steam Deck"), NoCommand, NoCommand);
         var second = new ManagedDeviceSummary(new PairedDeviceSummary(Guid.Parse("22222222-2222-4222-8222-222222222222"), "Steam Deck"), NoCommand, NoCommand);
-        Assert.AreEqual("RemoveDeviceButton-11111111-1111-4111-8111-111111111111", first.RemoveAutomationId);
+        Assert.AreEqual($"RemoveDeviceButton-{TestHost.DeviceIdText}", first.RemoveAutomationId);
         Assert.AreNotEqual(first.RemoveAutomationId, second.RemoveAutomationId);
         var renamed = new ManagedDeviceSummary(new PairedDeviceSummary(first.DeviceId, "Living room device"), NoCommand, NoCommand);
         Assert.AreEqual(first.RemoveAutomationId, renamed.RemoveAutomationId);
         Assert.AreEqual("Remove Living room device", renamed.RemoveLabel);
+    }
+
+    [TestMethod]
+    public void RowEditAvailabilityNotifiesOnlyWhenItChanges()
+    {
+        var row = new ManagedDeviceSummary(new(TestHost.DeviceId, "Bedroom device"), NoCommand, NoCommand);
+        var changes = 0;
+        row.PropertyChanged += (_, args) => { Assert.AreEqual(nameof(row.CanEdit), args.PropertyName); changes++; };
+        Assert.IsFalse(row.CanEdit);
+        row.CanEdit = true;
+        row.CanEdit = true;
+        row.CanEdit = false;
+        Assert.AreEqual(2, changes);
     }
 
     [TestMethod]

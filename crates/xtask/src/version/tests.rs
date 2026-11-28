@@ -1,5 +1,5 @@
-//! VERSION holds the one release version, and every build reads it or has to
-//! match it.
+//! The release version is written from the tag by tools/set_version.sh, and
+//! every manifest that records it has to agree.
 use std::{fs, path::Path};
 
 fn read(relative: &str) -> String {
@@ -8,10 +8,17 @@ fn read(relative: &str) -> String {
 }
 
 #[test]
-fn every_artifact_takes_its_version_from_version() {
-    let version = read("VERSION").trim().to_owned();
-    let parts: Vec<&str> = version.split('.').collect();
-    assert_eq!(parts.len(), 3, "{version}");
+fn every_manifest_records_the_same_version() {
+    let workspace = read("Cargo.toml");
+    let package = workspace.split("[workspace.package]").nth(1).unwrap();
+    let declared = package
+        .lines()
+        .find_map(|line| line.strip_prefix("version = "))
+        .unwrap()
+        .trim_matches('"')
+        .to_owned();
+    let parts: Vec<&str> = declared.split('.').collect();
+    assert_eq!(parts.len(), 3, "{declared}");
     assert!(
         parts
             .iter()
@@ -19,15 +26,9 @@ fn every_artifact_takes_its_version_from_version() {
     );
 
     let plugin: serde_json::Value = serde_json::from_str(&read("package.json")).unwrap();
-    assert_eq!(plugin["version"], version.as_str());
+    assert_eq!(plugin["version"], declared.as_str());
+    assert!(read("apps/windows-app/Directory.Build.props").contains(&format!("<Version>{declared}</Version>")));
 
-    let workspace = read("Cargo.toml");
-    let package = workspace.split("[workspace.package]").nth(1).unwrap();
-    let declared = package
-        .lines()
-        .find_map(|line| line.strip_prefix("version = "))
-        .unwrap();
-    assert_eq!(declared.trim_matches('"'), version);
     for member in fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap() {
         let manifest = member.unwrap().path().join("Cargo.toml");
         let text = fs::read_to_string(&manifest).unwrap();
@@ -38,7 +39,6 @@ fn every_artifact_takes_its_version_from_version() {
         );
     }
 
-    assert!(read("apps/windows-app/Directory.Build.props").contains("VERSION"));
     let installer = read("packaging/windows/my_rig.iss");
     assert!(!installer.lines().any(|line| {
         line.strip_prefix("AppVersion=")

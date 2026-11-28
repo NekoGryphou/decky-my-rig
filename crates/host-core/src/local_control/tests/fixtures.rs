@@ -16,6 +16,9 @@ impl Power for NoPower {
     fn schedule_shutdown(&self) -> Result<(), PowerError> {
         panic!("local control must not call power");
     }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        panic!("local control must not call power")
+    }
 }
 
 pub(super) fn host() -> Host {

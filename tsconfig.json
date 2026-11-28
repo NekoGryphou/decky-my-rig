@@ -9,6 +9,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },

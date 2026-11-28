@@ -1,6 +1,9 @@
 use super::{
     Paired, device_name_from,
-    fixtures::{PEER_HOST_ID, PairingPeer, pairing_peer, pairing_peer_busy_once, unchanged},
+    fixtures::{
+        PEER_HOST_ID, PairingPeer, pairing_peer, pairing_peer_at_device_limit,
+        pairing_peer_busy_once, unchanged,
+    },
     pair, request_code,
 };
 use crate::host_client::{
@@ -17,6 +20,8 @@ const INCORRECT: &str = "Pairing code is incorrect or the PC could not be verifi
 const EXPIRED: &str = "Pairing code expired or closed. Generate a new code.";
 const UNREACHABLE: &str = "PC is unreachable.";
 const NOT_SHOWN: &str = "PC could not show a pairing code.";
+const DEVICE_LIMIT: &str =
+    "This PC is at its device limit. Remove a paired device, then pair again.";
 
 async fn pair_with(
     host: &RealHost,
@@ -361,5 +366,41 @@ async fn a_busy_code_is_asked_again_before_finish() {
             PAIR_START_PATH,
             PAIR_FINISH_PATH
         ]
+    );
+}
+
+#[tokio::test]
+async fn pairing_says_when_the_pc_has_started_issuing_a_credential() {
+    use super::service::pair_tracked;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let host = real_host_with(true, Some(CODE)).await;
+    let wrong = AtomicBool::new(false);
+    pair_tracked(
+        Ipv4Addr::LOCALHOST,
+        host.address.port(),
+        "87654321",
+        None,
+        &wrong,
+    )
+    .await
+    .unwrap_err();
+    assert!(!wrong.load(Ordering::SeqCst), "a wrong code issues nothing");
+    let host = real_host_with(true, Some(CODE)).await;
+    let right = AtomicBool::new(false);
+    pair_tracked(Ipv4Addr::LOCALHOST, host.address.port(), CODE, None, &right)
+        .await
+        .unwrap();
+    assert!(right.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn a_full_pc_says_to_remove_a_device_instead_of_failing_generically() {
+    let peer = pairing_peer_at_device_limit(CODE).await;
+    let error = pair_peer(&peer, CODE, None).await.unwrap_err();
+    assert_eq!(error, DEVICE_LIMIT);
+    assert_eq!(
+        peer.paths().last().map(String::as_str),
+        Some(PAIR_FINISH_PATH),
+        "the refusal comes from the finish request"
     );
 }

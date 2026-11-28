@@ -1,4 +1,4 @@
-// After a failed reinstall the previous configuration is still in place, so start the service.
+// ? After a failed reinstall the previous configuration is still in place, so start the service.
 procedure RestartStoppedService;
 begin
   try
@@ -9,7 +9,7 @@ begin
   end;
 end;
 
-// Best effort: removes what a failed fresh install created, logging what it can't.
+// - Best effort: removes what a failed fresh install created, logging what it can't.
 procedure RollbackFreshInstall;
 begin
   try
@@ -31,7 +31,7 @@ begin
   except
     Log('Could not roll back the new manager group: ' + GetExceptionMessage);
   end;
-  // Only folders this run created: one another account made is not ours.
+  // ? Only folders this run created: one another account made is not ours.
   if not DataCreated then Exit;
   if not DelTree(ConfigDirectory, True, True, True) then
     Log('Could not roll back the new configuration directory.');

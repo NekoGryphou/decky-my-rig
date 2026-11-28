@@ -13,5 +13,7 @@ pub mod power;
 pub mod shared;
 pub mod snapshots;
 pub mod store;
+// ! Test support only: a failed setup should panic, so expect is the point here.
 #[cfg(any(test, feature = "testing"))]
+#[allow(clippy::expect_used)]
 pub mod testing;

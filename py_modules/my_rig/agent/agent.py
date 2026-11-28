@@ -13,14 +13,18 @@ from pathlib import Path
 from typing import Any
 
 from .agent_consts import (
+    CALL_TIMEOUT_SECONDS,
     EXIT_TIMEOUT_SECONDS,
     LINE_LIMIT,
     MAX_RESTARTS,
     REFUSED_EXIT,
+    STDERR_LINE_LIMIT,
+    WATCH_TIMEOUT_SECONDS,
 )
 from .agent_errors import AgentError
 from .agent_messages import INVALID_REVISION, UNAVAILABLE
 from .agent_types import Frame, Logger
+from .agent_utils import printable_line
 
 
 # noinspection PyTypeHints,PyTypeChecker
@@ -71,6 +75,10 @@ class AgentClient:
         process = self._process
         if self._closed or process is None or process.stdin is None:
             raise AgentError(self._refusal or UNAVAILABLE)
+        # ! While the agent is being replaced, the old process must not get a request: it would
+        # ! never answer, and the caller would wait out the full timeout.
+        if self._recovery is not None and not self._recovery.done():
+            raise AgentError(UNAVAILABLE)
         self._next += 1
         identifier = self._next
         reply: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
@@ -79,24 +87,41 @@ class AgentClient:
         try:
             process.stdin.write(line.encode() + b"\n")
             await process.stdin.drain()
-            return await reply
+            return await asyncio.wait_for(reply, CALL_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # ! Longer than any request deadline of the agent, so it is wedged: replace it, or every
+            # ! later call would wait out the timeout too.
+            self._begin_recovery()
+            raise AgentError(UNAVAILABLE) from None
         except (ConnectionError, RuntimeError):
             raise AgentError(UNAVAILABLE) from None
         finally:
             self._pending.pop(identifier, None)
+            # * A failure set while this caller was still writing is never awaited.
+            if reply.done() and not reply.cancelled():
+                reply.exception()
 
     async def watch(self, after: object) -> Frame:
-        """The latest frame unless the caller saw it, otherwise the next one."""
+        """The latest frame unless the caller saw it, otherwise the next one.
+
+        After the timeout, the latest frame even if the caller saw it.
+        """
         if type(after) is not int or after < -1:
             raise AgentError(INVALID_REVISION)
-        while True:
-            latest = self._latest
-            if self._closed:
-                return self._closed_frame()
-            if latest is not None and latest["revision"] != after:
-                return latest
-            self._changed.clear()
-            await self._changed.wait()
+        try:
+            async with asyncio.timeout(WATCH_TIMEOUT_SECONDS):
+                while True:
+                    latest = self._latest
+                    if self._closed:
+                        return self._closed_frame()
+                    if latest is not None and latest["revision"] != after:
+                        return latest
+                    self._changed.clear()
+                    await self._changed.wait()
+        except TimeoutError:
+            if self._latest is None:
+                raise AgentError(UNAVAILABLE) from None
+            return self._latest
 
     async def close(self) -> None:
         """Ends the agent: EOF on its stdin, then wait for it to exit.
@@ -121,8 +146,8 @@ class AgentClient:
     def _end_now(self, process: asyncio.subprocess.Process) -> None:
         """EOF on the agent's stdin and its exit, without the event loop."""
         if process.stdin is not None:
-            # ! Close the pipe ourselves: the transport would close it on a later
-            #   loop turn, which might never come.
+            # ! Close the pipe ourselves: the transport would close it on a later loop turn, which
+            # ! might never come.
             pipe = process.stdin.transport.get_extra_info("pipe")
             if pipe is not None:
                 pipe.close()
@@ -162,6 +187,7 @@ class AgentClient:
     async def _recover(self) -> None:
         """After the agent stopped answering: start it again, unless it
         refused to run or keeps ending."""
+        self._fail_pending()
         code = await self._stop_process()
         readers = [task for task in self._tasks if task is not asyncio.current_task()]
         if readers:
@@ -193,9 +219,16 @@ class AgentClient:
                 self._receive(line)
         except (ValueError, ConnectionError):
             self._logger.error("Decky My Rig agent sent an unreadable line.")
-        # - The reader stopped, so nothing pending can get an answer anymore.
+        # - The reader stopped, so pending calls get no answer.
         self._fail_pending()
-        if not self._stopping:
+        self._begin_recovery()
+
+    def _begin_recovery(self) -> None:
+        if self._stopping:
+            return
+        # - A timed-out call may already be replacing the agent; its end of
+        #   output must not start a second replacement.
+        if self._recovery is None or self._recovery.done():
             self._recovery = asyncio.create_task(self._recover())
 
     def _receive(self, line: bytes) -> None:
@@ -213,6 +246,8 @@ class AgentClient:
                 self._logger.error("Decky My Rig agent sent an invalid snapshot.")
                 return
             self._latest = frame
+            # ? A healthy snapshot means the restart worked, so the budget is fresh.
+            self._restarts = 0
             self._changed.set()
             return
         identifier = message.get("id")
@@ -240,7 +275,9 @@ class AgentClient:
                 return
             if not line:
                 return
-            text = line.decode(errors="replace").rstrip()
+            text = printable_line(
+                line.decode(errors="replace").rstrip(), STDERR_LINE_LIMIT
+            )
             self._last_error = text
             self._logger.error("Decky My Rig agent: %s", text)
 

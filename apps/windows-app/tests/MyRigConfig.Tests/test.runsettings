@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <MSTest>
+    <!-- ! A test that waits for a signal that never comes fails instead of hanging the run. -->
+    <TestTimeout>60000</TestTimeout>
+  </MSTest>
+</RunSettings>

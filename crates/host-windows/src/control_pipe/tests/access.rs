@@ -1,6 +1,7 @@
 use super::super::{
     consts::UNAUTHORIZED,
-    native::{authorize, create_pipe, local_account_sid, well_known},
+    native::{authorize, authorize_with, create_pipe, local_account_sid, well_known},
+    types::{Allowed, Authorize, RecordedUser},
 };
 use super::fixtures::*;
 use crate::control_client::connect_client;
@@ -86,7 +87,10 @@ async fn pipe_refuses_unlisted_caller() {
     let (name, mut pipe) = fixture(authorize);
     let mut other = current_sid_words();
     *other.last_mut().unwrap() ^= 1;
-    pipe.allowed_sids = Arc::new(vec![other]);
+    pipe.allowed = Arc::new(Allowed {
+        always: vec![other],
+        recorded_users: Vec::new(),
+    });
     let (stop, receiver) = watch::channel(false);
     let server = tokio::spawn(pipe.serve(|_, _context| b"unexpected".to_vec(), || (), receiver));
     let mut client = narrow_client(&name);
@@ -99,7 +103,10 @@ async fn pipe_refuses_unlisted_caller() {
 #[tokio::test]
 async fn pipe_accepts_allowed_group() {
     let (name, mut pipe) = fixture(authorize);
-    pipe.allowed_sids = Arc::new(vec![current_sid_words()]);
+    pipe.allowed = Arc::new(Allowed {
+        always: vec![current_sid_words()],
+        recorded_users: Vec::new(),
+    });
     let (stop, receiver) = watch::channel(false);
     let server = tokio::spawn(pipe.serve(|_, _context| b"allowed".to_vec(), || (), receiver));
     let mut client = narrow_client(&name);
@@ -120,4 +127,36 @@ fn local_account_lookup_resolves_this_machine_accounts() {
 fn missing_local_group_is_an_error() {
     let missing = format!("My Rig Missing Group {}", std::process::id());
     assert!(local_account_sid(&missing, SidTypeAlias).is_err());
+}
+
+/// Serves one request with the current user recorded as a manager, and the
+/// managers group reported as `members` at the time of the connection.
+async fn recorded_user_request(authorize: Authorize) -> Vec<u8> {
+    let (name, mut pipe) = fixture(authorize);
+    pipe.allowed = Arc::new(Allowed {
+        always: Vec::new(),
+        recorded_users: vec![RecordedUser {
+            text: current_sid(),
+            words: current_sid_words(),
+        }],
+    });
+    let (stop, receiver) = watch::channel(false);
+    let server = tokio::spawn(pipe.serve(|_, _context| b"allowed".to_vec(), || (), receiver));
+    let mut client = narrow_client(&name);
+    let reply = request(&mut client, b"recorded user").await;
+    drop(client);
+    stop.send(true).unwrap();
+    server.await.unwrap().unwrap();
+    reply
+}
+
+#[tokio::test]
+async fn a_recorded_user_is_refused_once_removed_from_the_group() {
+    let removed: Authorize = |pipe, allowed| authorize_with(pipe, allowed, || Ok(Vec::new()));
+    assert_eq!(recorded_user_request(removed).await, UNAUTHORIZED);
+    let unreadable: Authorize = |pipe, allowed| authorize_with(pipe, allowed, || Err("unreadable"));
+    assert_eq!(recorded_user_request(unreadable).await, UNAUTHORIZED);
+    let member: Authorize =
+        |pipe, allowed| authorize_with(pipe, allowed, || Ok(vec![current_sid()]));
+    assert_eq!(recorded_user_request(member).await, b"allowed");
 }

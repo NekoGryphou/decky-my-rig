@@ -10,6 +10,9 @@ async fn four_event_waiters_leave_status_mutation_and_rejections_responsive() {
         fn schedule_shutdown(&self) -> Result<(), myrig_host_core::shutdown::PowerError> {
             panic!("pipe capacity tests must never reach power");
         }
+        fn cancel_shutdown(&self) -> Result<(), myrig_host_core::shutdown::PowerError> {
+            panic!("pipe capacity tests must never reach power")
+        }
     }
     let host = Arc::new(myrig_host_core::host::Host::new(
         myrig_host_core::paired_devices::RegistryConfig::from_json(br#"{"schema_version":3,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","port":49000,"test_mode":false,"paired_devices":[]}"#).unwrap(),
@@ -90,6 +93,9 @@ async fn close_invalidates_an_older_pipe_worker_before_core_dispatch() {
         fn schedule_shutdown(&self) -> Result<(), myrig_host_core::shutdown::PowerError> {
             panic!("pairing ordering test must never reach power");
         }
+        fn cancel_shutdown(&self) -> Result<(), myrig_host_core::shutdown::PowerError> {
+            panic!("pairing ordering test must never reach power");
+        }
     }
     let host = Arc::new(myrig_host_core::host::Host::new(
         myrig_host_core::paired_devices::RegistryConfig::from_json(br#"{"schema_version":3,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","port":49000,"test_mode":true,"paired_devices":[]}"#).unwrap(),
@@ -127,7 +133,7 @@ async fn close_invalidates_an_older_pipe_worker_before_core_dispatch() {
                                 "12345678",
                                 [7; 32],
                                 b"cert",
-                                [1; 32],
+                                &[1; 32],
                                 uuid::Uuid::from_u128(3),
                                 Arc::new(|_| Ok(())),
                             )

@@ -1,6 +1,6 @@
 use super::{
     PublicError, normalize_host, normalize_mac, normalize_name, normalize_port, normalize_token,
-    normalize_uuid,
+    normalize_uuid, read_bounded,
 };
 use std::{fmt::Debug, net::Ipv4Addr};
 
@@ -162,4 +162,12 @@ fn uuids_are_canonical() {
             "bad",
         ],
     );
+}
+
+#[test]
+fn bounded_read_returns_up_to_the_limit_and_rejects_one_byte_more() {
+    assert_eq!(read_bounded(&[1u8, 2][..], 4).ok(), Some(vec![1, 2]));
+    assert_eq!(read_bounded(&[1u8; 4][..], 4).ok(), Some(vec![1; 4]));
+    let error = read_bounded(&[1u8; 5][..], 4).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }

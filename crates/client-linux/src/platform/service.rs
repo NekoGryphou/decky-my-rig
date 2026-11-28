@@ -1,6 +1,12 @@
-use super::{consts::HOSTNAME_PATH, messages::NO_HOME, types::Linux, utils::config_dir_from};
+use super::native::Echo;
+use super::{
+    consts::HOSTNAME_PATH,
+    messages::NO_HOME,
+    types::Linux,
+    utils::{config_dir_from, read_hostname},
+};
 use crate::{neighbors::neighbor_macs, network::broadcast_interfaces, settings::LinuxSettings};
-use myrig_client::platform::{Platform, Settings};
+use myrig_client::platform::{InputEcho, Platform, Settings};
 use std::{
     io,
     net::Ipv4Addr,
@@ -8,6 +14,9 @@ use std::{
 };
 
 impl Platform for Linux {
+    fn hide_input(&self) -> Option<Box<dyn InputEcho>> {
+        Echo::hide().map(|echo| Box::new(echo) as Box<dyn InputEcho>)
+    }
     fn settings_directory(&self) -> Result<PathBuf, &'static str> {
         config_dir_from(
             std::env::var_os("XDG_CONFIG_HOME"),
@@ -25,6 +34,6 @@ impl Platform for Linux {
         neighbor_macs(host)
     }
     fn hostname(&self) -> Option<String> {
-        std::fs::read_to_string(HOSTNAME_PATH).ok()
+        read_hostname(Path::new(HOSTNAME_PATH))
     }
 }

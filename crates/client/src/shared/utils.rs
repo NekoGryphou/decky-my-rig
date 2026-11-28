@@ -7,7 +7,10 @@ use super::{
     },
 };
 use myrig_protocol::validation::{canonical_uuid, decode_hex, valid_name};
-use std::net::Ipv4Addr;
+use std::{
+    io::{self, Read},
+    net::Ipv4Addr,
+};
 use uuid::Uuid;
 
 /// Trims surrounding whitespace. Control characters are rejected before
@@ -96,4 +99,15 @@ pub fn normalize_token(value: &str) -> Result<String, PublicError> {
 
 pub fn normalize_uuid(value: &str) -> Result<Uuid, PublicError> {
     canonical_uuid(text(value, IDENTIFIER_INVALID)?).ok_or(PublicError(IDENTIFIER_INVALID))
+}
+
+/// Reads at most `limit` bytes; one more byte means the file is too big and
+/// fails with `InvalidData` instead of being read whole.
+pub fn read_bounded(file: impl Read, limit: usize) -> io::Result<Vec<u8>> {
+    let mut raw = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut raw)?;
+    if raw.len() > limit {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(raw)
 }

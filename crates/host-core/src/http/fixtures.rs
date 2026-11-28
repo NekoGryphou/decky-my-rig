@@ -9,6 +9,9 @@ pub(super) fn empty_registry_host() -> Arc<Host> {
         fn schedule_shutdown(&self) -> Result<(), crate::shutdown::PowerError> {
             panic!("pairing cannot power off");
         }
+        fn cancel_shutdown(&self) -> Result<(), crate::shutdown::PowerError> {
+            panic!("pairing cannot power off")
+        }
     }
     let value = json!({"schema_version":3,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","port":47991,"test_mode":true,"paired_devices":[]});
     Arc::new(Host::new(

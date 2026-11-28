@@ -23,7 +23,7 @@ function ConvertSecurityDescriptorToStringSecurityDescriptorW(Descriptor: DWORD_
   Revision, SecurityInformation: DWORD; var Text: DWORD_PTR; var Characters: DWORD): Boolean;
   external 'ConvertSecurityDescriptorToStringSecurityDescriptorW@advapi32.dll stdcall';
 
-// What `sc sdshow` prints after Windows stores the descriptor.
+// - What `sc sdshow` prints after Windows stores the descriptor.
 function CanonicalSddl(Sddl: String): String;
 var
   Descriptor, Text: DWORD_PTR;
@@ -46,7 +46,7 @@ begin
   end;
 end;
 
-// Grants twice through Windows' normalization and counts the writes.
+// - Grants twice through Windows' normalization and counts the writes.
 function InitializeSetup: Boolean;
 var
   Stored, Updated: String;

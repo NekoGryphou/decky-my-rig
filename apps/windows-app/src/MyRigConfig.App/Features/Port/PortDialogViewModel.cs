@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using MyRigConfig.Core.Host;
+using MyRigConfig.Shared;
 
 namespace MyRigConfig.Features.Port;
 
@@ -7,26 +8,33 @@ namespace MyRigConfig.Features.Port;
 public partial class PortDialogViewModel : ObservableObject
 {
     private readonly int currentPort;
-    private readonly Func<int, int?> findListener;
-    private readonly Func<int, string?> processName;
+    private readonly IPortProbe probe;
     private Task validation = Task.CompletedTask;
     private double? pending;
     private bool validating;
     private bool closed;
 
-    public PortDialogViewModel(int currentPort) : this(currentPort, HostNetwork.FindListener, HostNetwork.ProcessName) { }
+    public PortDialogViewModel(int currentPort) : this(currentPort, new HostPortProbeService()) { }
 
-    internal PortDialogViewModel(int currentPort, Func<int, int?> findListener, Func<int, string?> processName)
+    internal PortDialogViewModel(int currentPort, IPortProbe probe)
     {
-        this.findListener = findListener;
-        this.processName = processName;
+        this.probe = probe;
         this.currentPort = currentPort;
         Error = "";
-        PortInput = currentPort;
+        PortText = currentPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>NaN while the box is empty.</summary>
     [ObservableProperty] public partial double PortInput { get; set; }
+
+    /// <summary>The text in the box. Each change is checked at once, so Save follows the typing.</summary>
+    [ObservableProperty] public partial string PortText { get; set; } = "";
+
+    partial void OnPortTextChanged(string value)
+    {
+        PortInput = double.TryParse(value, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : double.NaN;
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasError))]
@@ -66,8 +74,10 @@ public partial class PortDialogViewModel : ObservableObject
             {
                 pending = null;
                 PortCheck? check;
-                try { check = await Task.Run(() => PortCheck.Of(value, currentPort, findListener, processName)); }
-                catch (System.ComponentModel.Win32Exception) { check = null; }
+                try { check = await Task.Run(() => PortCheck.Of(value, currentPort, probe)); }
+                // ! Whatever the lookup throws, the dialog shows "couldn't be checked" and stays usable: a stored
+                // ! exception would resurface from CloseAsync, inside the page's finally.
+                catch (Exception) { check = null; }
                 if (closed) return;
                 if (pending.HasValue) continue;
                 if (check is null)
@@ -88,7 +98,7 @@ public partial class PortDialogViewModel : ObservableObject
         Error = check.Result switch
         {
             PortCheckResult.OutOfRange => PortMessages.OutOfRange,
-            PortCheckResult.InUse => PortMessages.InUse(check.Port, check.Owner),
+            PortCheckResult.InUse => SharedMessages.PortInUseSentence(check.Port, check.Owner),
             _ => "",
         };
     }

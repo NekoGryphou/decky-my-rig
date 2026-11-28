@@ -8,4 +8,6 @@ mod utils;
 pub use types::{Authentication, PcChanges, PcConfig, PcInput, Store};
 
 #[cfg(test)]
+mod fixtures;
+#[cfg(test)]
 mod tests;

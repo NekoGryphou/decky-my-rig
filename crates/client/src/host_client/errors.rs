@@ -1,3 +1,4 @@
+use myrig_protocol::api::PcIssue;
 use std::fmt;
 
 /// Why a host request failed. None of these include text from the host.
@@ -15,6 +16,18 @@ pub enum HostError {
     Connection,
     /// The request deadline passed.
     Timeout,
+}
+
+impl HostError {
+    /// The answers the user has to deal with, rather than something to retry.
+    pub fn issue(self) -> Option<PcIssue> {
+        match self {
+            Self::PinMismatch => Some(PcIssue::Identity),
+            Self::Unauthorized => Some(PcIssue::Authentication),
+            Self::UnsupportedProtocol => Some(PcIssue::Compatibility),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for HostError {

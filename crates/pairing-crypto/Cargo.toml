@@ -5,10 +5,11 @@ edition = "2024"
 publish = false
 
 [dependencies]
-opaque-ke = { version = "=4.0.1", features = ["argon2"] }
-argon2 = "=0.5.3"
-rand = "=0.8.6"
+opaque-ke = { version = "=5.0.0-pre.0", features = ["argon2"] }
+argon2 = "=0.6.0"
+rand = "=0.10.4"
 sha2.workspace = true
+subtle.workspace = true
 zeroize.workspace = true
 
 [lints]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the Decky plugin zip into out/release: the frontend, the Python relay
-# and an agent per platform.
+# - Builds the Decky plugin zip into out/release: the frontend, the Python relay
+#   and an agent per platform.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,8 +19,10 @@ need_command pnpm "install Node.js 22.12 or newer, then npm install --global pnp
 need_path "$repo_root/node_modules" "plugin packages" "pnpm install --frozen-lockfile"
 report_missing
 
-version="$(cat "$repo_root/VERSION")"
+version="$(sed -n '/^\[workspace.package\]/,/^version/{s/^version = "\(.*\)"/\1/p}' "$repo_root/Cargo.toml")"
 mkdir -p "$repo_root/out/release"
-(cd "$repo_root" && cargo xtask plugin "$@" > /dev/null)
+# - A stale zip must not survive a failed build and get copied below.
+rm -f "$repo_root/out/build/decky-plugin/myrig-plugin-v$version.zip"
+cargo xtask plugin "$@" > /dev/null
 cp "$repo_root/out/build/decky-plugin/myrig-plugin-v$version.zip" "$repo_root/out/release/"
 echo "$repo_root/out/release/myrig-plugin-v$version.zip"

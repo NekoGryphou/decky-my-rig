@@ -1,3 +1,4 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Text;
 using MyRigConfig.Core.Host;
 using MyRigConfig.Core.LocalControl;
@@ -8,14 +9,14 @@ namespace MyRigConfig.Tests;
 [TestClass]
 public sealed class HostDeviceEditTests
 {
-    private const string Host = "03c85317-9d93-4fb3-a04b-91a0e16668c6";
-    private const string Device = "11111111-1111-4111-8111-111111111111";
+    private const string Host = TestHost.IdText;
+    private const string Device = TestHost.DeviceIdText;
 
     private static (HostViewModel Model, List<string> Requests) Model(Func<string> renameReply)
     {
         var name = "SteamDeck";
         var requests = new List<string>();
-        var client = new HostControlClient((request, sending, _) =>
+        var client = new HostControlClientService((request, sending, _) =>
         {
             sending();
             var text = Encoding.UTF8.GetString(request);
@@ -32,9 +33,7 @@ public sealed class HostDeviceEditTests
             return Task.FromResult(Encoding.UTF8.GetBytes(
                 $"{{\"version\":1,\"ok\":true,\"host_id\":\"{Host}\",\"paired_devices\":[{{\"device_id\":\"{Device}\",\"name\":\"{name}\"}}]}}"));
         });
-        var model = new HostViewModel(client, _ => Task.FromResult(new HostObservation(ServiceState.Running,
-            new HostStatus(47991, false, "listening"), null)), TimeProvider.System);
-        return (model, requests);
+        return (TestHost.Model(client), requests);
     }
 
     [TestMethod]

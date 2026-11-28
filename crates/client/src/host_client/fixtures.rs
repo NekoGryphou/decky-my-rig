@@ -43,6 +43,9 @@ impl Power for CountingPower {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        Ok(())
+    }
 }
 
 /// A host whose registry holds the devices with tokens `token(1)` and `token(2)`.
@@ -79,7 +82,7 @@ pub(crate) async fn real_host_with(test_mode: bool, code: Option<&str>) -> RealH
             code,
             [3; 32],
             identity.leaf_der(),
-            [8; 32],
+            &[8; 32],
             uuid::Uuid::new_v4(),
             Arc::new(|_| Ok(())),
         )

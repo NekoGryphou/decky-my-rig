@@ -25,7 +25,8 @@ pub(crate) fn wide(value: &str) -> Vec<u16> {
 pub(crate) struct LocalAllocation(pub(crate) *mut std::ffi::c_void);
 impl Drop for LocalAllocation {
     fn drop(&mut self) {
-        // ! SAFETY: `self.0` came from a successful LocalAlloc-based API and is freed once, on drop.
+        // ! SAFETY: `self.0` came from a successful LocalAlloc-based API and is freed once, on
+        // ! drop.
         unsafe {
             LocalFree(Some(HLOCAL(self.0)));
         }
@@ -40,7 +41,8 @@ pub(crate) fn with_security<T>(
 ) -> Result<T, &'static str> {
     let text = wide(sddl);
     let mut pointer = PSECURITY_DESCRIPTOR::default();
-    // ! SAFETY: the SDDL text is NUL-terminated and outlives the call; the returned descriptor is freed by `allocation`.
+    // ! SAFETY: the SDDL text is NUL-terminated and outlives the call; the returned descriptor is
+    // ! freed by `allocation`.
     unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
             PCWSTR(text.as_ptr()),

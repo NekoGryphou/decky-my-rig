@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds every release file into out/release.
+# - Builds every release file into out/release.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

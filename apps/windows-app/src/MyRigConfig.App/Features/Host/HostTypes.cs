@@ -1,11 +1,9 @@
 using MyRigConfig.Shared;
-
 namespace MyRigConfig.Features.Host;
 
 public sealed record HostNotice(string Title, string Message, MessageTone Severity);
 
-/// <summary>The dialogs the page shows for the view model's commands. Each returns the user's
-/// answer.</summary>
+/// <summary>The dialogs the page shows for the view model's commands. Each returns the user's answer.</summary>
 public interface IHostDialogs
 {
     Task ShowPairingAsync(CancellationToken cancellationToken);

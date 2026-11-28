@@ -28,7 +28,16 @@ fn event(sequence: u64, name: &str) -> serde_json::Value {
     serde_json::json!({"sequence":sequence,"kind":"test_shutdown","device_name":name,"time_unix":1})
 }
 fn pairing_event(sequence: u64, name: &str) -> serde_json::Value {
-    serde_json::json!({"sequence":sequence,"kind":"pairing_request","device_name":name,"time_unix":1})
+    pairing_event_at(sequence, name, now_unix())
+}
+fn pairing_event_at(sequence: u64, name: &str, time_unix: u64) -> serde_json::Value {
+    serde_json::json!({"sequence":sequence,"kind":"pairing_request","device_name":name,"time_unix":time_unix})
+}
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 fn pairing_code(code: &str) -> Vec<u8> {
     serde_json::json!({"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","code":code,"expires_in_seconds":120}).to_string().into_bytes()
@@ -41,7 +50,25 @@ fn response(events: Vec<serde_json::Value>) -> Vec<u8> {
     response_with_baseline(baseline_sequence, events)
 }
 fn response_with_baseline(baseline_sequence: u64, events: Vec<serde_json::Value>) -> Vec<u8> {
-    serde_json::json!({"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","baseline_sequence":baseline_sequence,"events":events}).to_string().into_bytes()
+    response_in_epoch("first-boot", baseline_sequence, events)
+}
+fn response_in_epoch(
+    epoch: &str,
+    baseline_sequence: u64,
+    events: Vec<serde_json::Value>,
+) -> Vec<u8> {
+    wait_reply(epoch, baseline_sequence, false, events)
+}
+fn closed_response() -> Vec<u8> {
+    wait_reply("first-boot", 0, true, vec![])
+}
+fn wait_reply(
+    epoch: &str,
+    baseline_sequence: u64,
+    closed: bool,
+    events: Vec<serde_json::Value>,
+) -> Vec<u8> {
+    serde_json::json!({"version":1,"ok":true,"host_id":"03c85317-9d93-4fb3-a04b-91a0e16668c6","epoch":epoch,"baseline_sequence":baseline_sequence,"closed":closed,"events":events}).to_string().into_bytes()
 }
 async fn exercise(
     plans: Vec<Result<Vec<u8>, io::ErrorKind>>,
@@ -288,6 +315,38 @@ async fn notifier_lower_baseline_delivers_the_restarted_services_events_once() {
 }
 
 #[tokio::test]
+async fn notifier_delivers_a_restarted_services_events_below_its_old_cursor() {
+    // ! The restarted host has sequences that pass the old cursor (3), so a lower baseline alone
+    // ! can't reveal the restart. Its new epoch does.
+    let (notices, _, afters, _) = exercise(vec![
+        Ok(response_in_epoch(
+            "boot-a",
+            3,
+            vec![event(1, "Old A"), event(2, "Old B"), event(3, "Old C")],
+        )),
+        Err(io::ErrorKind::NotFound),
+        Ok(response_in_epoch(
+            "boot-b",
+            5,
+            vec![
+                event(1, "New A"),
+                event(2, "New B"),
+                event(3, "New C"),
+                event(4, "New D"),
+                event(5, "New E"),
+            ],
+        )),
+    ])
+    .await;
+    assert_eq!(afters, vec![0, 3]);
+    assert_eq!(
+        notices.len(),
+        5,
+        "every event of the restarted host is shown: {notices:?}"
+    );
+}
+
+#[tokio::test]
 async fn notifier_shows_the_code_for_a_pairing_request() {
     let (notices, _, afters, _) = exercise(vec![
         Ok(response_with_baseline(
@@ -308,6 +367,21 @@ async fn notifier_shows_the_code_for_a_pairing_request() {
 }
 
 #[tokio::test]
+async fn notifier_does_not_open_codes_for_requests_older_than_a_code_lifetime() {
+    // ! A reconnect replays buffered events. An old request must not open a new code the user never
+    // ! asked for.
+    let (notices, _, _, _) = exercise(vec![
+        Ok(response_with_baseline(
+            0,
+            vec![pairing_event_at(1, "steamdeck", 1)],
+        )),
+        Ok(pairing_code("48210937")),
+    ])
+    .await;
+    assert!(notices.is_empty());
+}
+
+#[tokio::test]
 async fn notifier_shows_nothing_when_the_code_cannot_be_opened() {
     let (notices, _, afters, _) = exercise(vec![
         Ok(response_with_baseline(
@@ -324,8 +398,7 @@ async fn notifier_shows_nothing_when_the_code_cannot_be_opened() {
 
 #[tokio::test]
 async fn notifier_outside_the_console_session_opens_no_code() {
-    // ! A second open from another session would replace the code shown on the
-    //   PC.
+    // ! A second open from another session would replace the code shown on the PC.
     let (notices, _, afters, _) = exercise_with(
         vec![
             Ok(response_with_baseline(
@@ -339,4 +412,62 @@ async fn notifier_outside_the_console_session_opens_no_code() {
     .await;
     assert!(notices.is_empty());
     assert_eq!(afters, vec![0, 1]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn notifier_gives_up_on_a_silent_service_and_backs_off() {
+    // ! A service that accepts the pipe and never answers must not stall the notifier. The clock is
+    // ! paused, so the timeout fires without real waiting.
+    let silent = Arc::new(Mutex::new(Vec::new()));
+    let delays = Arc::new(Mutex::new(Vec::new()));
+    let connects = Arc::new(AtomicUsize::new(0));
+    let notifier = RecordingNotifier::default();
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(600),
+        run(
+            {
+                let (silent, connects) = (silent.clone(), connects.clone());
+                move || {
+                    let (silent, connects) = (silent.clone(), connects.clone());
+                    async move {
+                        if connects.fetch_add(1, Ordering::SeqCst) >= 2 {
+                            return Ok(None);
+                        }
+                        let (client, server) = tokio::io::duplex(8192);
+                        silent.lock().unwrap().push(server);
+                        Ok::<Option<DuplexStream>, io::Error>(Some(client))
+                    }
+                }
+            },
+            &notifier,
+            |duration| {
+                delays.lock().unwrap().push(duration);
+                std::future::ready(())
+            },
+        ),
+    )
+    .await;
+    assert!(outcome.is_ok(), "the notifier stalled on a silent service");
+    assert_eq!(
+        delays.lock().unwrap().first(),
+        Some(&super::consts::FIRST_BACKOFF)
+    );
+}
+
+#[tokio::test]
+async fn notifier_waits_between_immediate_replies_from_a_stopping_service() {
+    let (_, delays, _, _) = exercise(vec![
+        Ok(closed_response()),
+        Ok(closed_response()),
+        Ok(closed_response()),
+    ])
+    .await;
+    assert_eq!(
+        delays,
+        vec![
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4)
+        ]
+    );
 }

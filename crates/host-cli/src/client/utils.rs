@@ -60,8 +60,7 @@ where
             }
             Ok(messages::removed(&name))
         }
-        // * `renamed: false` just means it already had that name; the device
-        //   exists.
+        // * `renamed: false` just means it already had that name; the device exists.
         Command::Rename(device_id, name) => {
             paired_name(host_id, device_id, &mut send).await?;
             from_host::<RenameReply>(host_id, &send(request).await?)?;

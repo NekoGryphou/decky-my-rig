@@ -32,3 +32,17 @@ fn entropy_failures_and_rejected_samples_are_bounded() {
     .unwrap();
     assert_eq!(code, "00000000");
 }
+
+#[test]
+fn the_device_id_is_version_4_variant_rfc_4122_whatever_the_random_bytes() {
+    for fill in [0x00, 0xff, 0xa5] {
+        let (_, _, id) = generate_with(|bytes| {
+            // * The code draw stays in range so only the ID varies.
+            bytes.fill(if bytes.len() == 4 { 0 } else { fill });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(id.get_version_num(), 4);
+        assert_eq!(id.get_variant(), uuid::Variant::RFC4122);
+    }
+}

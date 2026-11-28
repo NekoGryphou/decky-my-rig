@@ -1,5 +1,6 @@
 mod consts;
 mod messages;
+mod native;
 mod service;
 mod types;
 mod utils;

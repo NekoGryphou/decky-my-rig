@@ -1,5 +1,5 @@
-# ? A shell started from WSL may be older than the Rust install's PATH change, so
-#   we read where Rust is from the user variables rustup set.
+# ? A shell started from WSL may be older than the Rust install's PATH change, so we read where Rust
+# ? is from the user variables rustup set.
 function Use-Rust {
     $cargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME', 'User')
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue) -and $cargoHome) {
@@ -36,7 +36,7 @@ function Assert-Prerequisites([switch] $Clippy, [switch] $Arm64) {
         if (-not $arm) {
             $missing += 'MSVC ARM64 build tools: add "MSVC ARM64 build tools" in the Visual Studio Installer'
         }
-        # ? ring builds its ARM64 code with clang.
+        # - ring builds its ARM64 code with clang.
         if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
             $missing += 'clang for aarch64: add "C++ Clang tools for Windows" in the Visual Studio Installer and put its bin on PATH'
         }

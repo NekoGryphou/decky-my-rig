@@ -13,7 +13,8 @@ $env:RUSTFLAGS = '-C target-feature=+crt-static'
 # ? An explicit target keeps these builds apart from Linux ones in out\cargo.
 $target = 'x86_64-pc-windows-msvc'
 
-Invoke-Checked cargo @('clippy', '--manifest-path', $manifest, '--locked', '--release', '--target', $target, '--workspace', '--all-features', '--all-targets', '--', '-D', 'warnings')
+# * Clippy only checks, so the release profile's fat LTO would add nothing here.
+Invoke-Checked cargo @('clippy', '--manifest-path', $manifest, '--locked', '--target', $target, '--workspace', '--all-features', '--all-targets', '--', '-D', 'warnings')
 # * --all-features: the service half of host-windows is tested too.
 Invoke-Checked cargo @('test', '--manifest-path', $manifest, '--locked', '--release', '--target', $target, '--all-features', '--lib', '-p', 'myrig-host-windows', '-p', 'myrig-client', '-p', 'myrig-client-windows')
 # * The installer tests run the real setup helper.

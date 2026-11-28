@@ -28,8 +28,8 @@ pub fn encode(request: &ControlRequest) -> Vec<u8> {
     match request {
         ControlRequest::Status => json!({"version":1,"operation":"status"}),
         ControlRequest::List => json!({"version":1,"operation":"list"}),
-        ControlRequest::WaitEvents { after } => {
-            json!({"version":1,"operation":"wait_events","after":after})
+        ControlRequest::WaitEvents { after, epoch } => {
+            json!({"version":1,"operation":"wait_events","after":after,"epoch":epoch})
         }
         ControlRequest::OpenPairing { host_id, name } => {
             json!({"version":1,"operation":"open_pairing","host_id":host_id,"name":name})

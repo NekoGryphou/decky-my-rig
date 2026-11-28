@@ -258,7 +258,7 @@ async fn an_edit_made_during_a_wake_survives_it() {
         name: Some("Renamed".into()),
         ..PcChanges::default()
     };
-    fixture.controller.update_pc(&id, renamed).unwrap();
+    fixture.controller.update_pc(&id, renamed).await.unwrap();
     gate.add_permits(1);
     assert!(starting.await.unwrap().is_err());
     // - The failed wake was for the old record, so the edit's fresh state stays.
@@ -278,6 +278,7 @@ async fn edits_recheck_the_pc_and_keep_its_credentials() {
                 ..PcChanges::default()
             },
         )
+        .await
         .unwrap();
     assert_eq!(
         (settings.id.as_str(), settings.host.as_str()),
@@ -292,6 +293,7 @@ async fn edits_recheck_the_pc_and_keep_its_credentials() {
         fixture
             .controller
             .update_pc(&id, credentials)
+            .await
             .unwrap_err()
             .0,
         "Credentials come only from pairing."
@@ -419,13 +421,12 @@ async fn live_environment_polls_and_test_stops_a_real_host() {
 
 #[tokio::test]
 async fn an_unchanged_refresh_publishes_nothing_new() {
-    // ! Every frame wakes the frontend through Decky, so a poll that changed
-    //   nothing mustn't send one every 15 s.
+    // ! Every frame wakes the frontend through Decky, so a poll that changed nothing mustn't send
+    // ! one every 15 s.
     let fixture = fixture(FakeEnvironment::default());
     online_pc(&fixture).await;
     let action = fixture.controller.publish(false).revision;
-    // * The first refresh after an action is always sent, which clears that
-    //   action's error.
+    // * The first refresh after an action is always sent, which clears that action's error.
     let refreshed = fixture.controller.publish(true);
     assert_eq!(
         (refreshed.revision, refreshed.refreshed),
@@ -433,4 +434,19 @@ async fn an_unchanged_refresh_publishes_nothing_new() {
     );
     assert_eq!(fixture.controller.publish(true).revision, action + 1);
     assert_eq!(fixture.controller.publish(true).revision, action + 1);
+}
+
+#[test]
+fn a_restarted_agent_never_reuses_a_revision_the_frontend_holds() {
+    let first = fixture(FakeEnvironment::default());
+    let held = (0..50)
+        .map(|_| first.controller.publish(false).revision)
+        .max()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(2));
+    let second = fixture(FakeEnvironment::default());
+    let restarted = second.controller.publish(false).revision;
+    assert!(restarted > held, "{restarted} <= {held}");
+    // - The frontend reads revisions as JavaScript numbers.
+    assert!(restarted < 1 << 53);
 }

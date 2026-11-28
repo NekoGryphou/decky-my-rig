@@ -16,8 +16,8 @@ OutputBaseFilename=manager_users_fixture
 #include AddBackslash(CodeDir) + "install_utils.iss"
 #include AddBackslash(CodeDir) + "managers.iss"
 
-// Records two users, one of them twice, under an owned HKCU key and saves
-// what was stored, one SID per line; the key is removed afterwards.
+// - Records two users, one of them twice, under an owned HKCU key and saves
+//   what was stored, one SID per line; the key is removed afterwards.
 function InitializeSetup: Boolean;
 var
   Key, Users: String;

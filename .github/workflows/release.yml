@@ -8,8 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  # ! Only a VERSION tag on main gets published. This is checked before anything
-  #   builds.
+  # ! Only a vX.Y.Z tag on main gets published. This is checked before anything builds.
   gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -18,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: |
-          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
   build:
@@ -54,8 +53,7 @@ jobs:
           cd release
           {
             echo '```text'
-            sha256sum ./*.exe ./*.zip ./*.tar.gz
+            sha256sum *.exe *.zip *.tar.gz
             echo '```'
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" ./*.exe ./*.zip ./*.tar.gz \
-            --title "Decky My Rig $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+          gh release create "$GITHUB_REF_NAME" *.exe *.zip *.tar.gz --title "Decky My Rig $GITHUB_REF_NAME" --notes-file notes.md --generate-notes

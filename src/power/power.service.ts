@@ -1,7 +1,11 @@
-import { startPc, stopPc, watchSnapshot } from "../shared/api.service";
+import { api } from "../shared/api.service";
 import type { SnapshotFrame } from "../shared/api.types";
 import { NotificationService } from "./notifications/notifications.service";
-import { INITIAL_POWER_STATE, RECONNECT_MS } from "./power.consts";
+import {
+  INITIAL_POWER_STATE,
+  RECONNECT_MS,
+  WATCH_STALL_MS,
+} from "./power.consts";
 import { publicMessage } from "../shared/error.utils";
 import { POWER_STATUS, QAM_ERROR, QAM_UNAVAILABLE } from "./power.messages";
 import { stateAction, statusMessage } from "./power.utils";
@@ -53,8 +57,8 @@ export class PowerService {
       error: "",
     });
     try {
-      if (action === "start") await startPc(pc.id);
-      else await stopPc(pc.id);
+      if (action === "start") await api.startPc(pc.id);
+      else await api.stopPc(pc.id);
     } catch (failure) {
       if (this.current(generation)) {
         const reason = publicMessage(failure, QAM_ERROR);
@@ -89,7 +93,7 @@ export class PowerService {
     while (this.current(generation)) {
       let frame: SnapshotFrame;
       try {
-        frame = await watchSnapshot(after);
+        frame = await subscribe(after);
       } catch {
         if (this.current(generation)) {
           this.update({
@@ -106,10 +110,13 @@ export class PowerService {
       }
       if (!this.current(generation)) return;
       if (frame.closed) {
+        this.notifications.reset();
         this.active = false;
         this.update({ loaded: true, available: false, error: QAM_UNAVAILABLE });
         return;
       }
+      // - The backend ends an unanswered watch with the frame already shown.
+      if (frame.revision === after) continue;
       this.notifications.update(frame.pcs, frame.test_stops);
       if (frame.refreshed) this.actionError = "";
       this.update({
@@ -121,6 +128,27 @@ export class PowerService {
       after = frame.revision;
     }
   }
+}
+
+/// One snapshot request. A request that never answers is rejected after the
+/// stall limit, so the watch loop retries instead of waiting forever.
+function subscribe(after: number): Promise<SnapshotFrame> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("snapshot stalled")),
+      WATCH_STALL_MS,
+    );
+    api.watchSnapshot(after).then(
+      (frame) => {
+        clearTimeout(timer);
+        resolve(frame);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 export const powerService = new PowerService();

@@ -1,15 +1,14 @@
 use super::super::{
     types::Reply,
     utils::{
-        accepts_json, invalid, json_media, pairing_busy, pairing_unavailable, read_body,
-        reply_body, single,
+        accepts_json, checked_value, device_limit, invalid, json_media, pairing_busy,
+        pairing_unavailable, read_body, reply_body, single,
     },
 };
 use super::types::FinishRequest;
 use crate::host::{Host, PairingRefusal};
 use hyper::{Method, StatusCode, body::Incoming, header::HeaderValue, http::request::Parts};
 use myrig_pairing_crypto::{CONFIRMATION_LEN, REQUEST_LEN, session::AttemptId};
-use myrig_protocol::checked_json::CheckedJson;
 use myrig_protocol::lan::{
     PAIR_FINISH_PATH, PAIR_INFO_PATH, PAIR_START_PATH, PairFinishReply, PairInfoReply,
     PairStartReply,
@@ -58,7 +57,7 @@ pub(in crate::http) async fn handle(
             },
         )
     } else {
-        let Ok(CheckedJson(value)) = serde_json::from_slice::<CheckedJson>(&bytes) else {
+        let Some(value) = checked_value(&bytes) else {
             return invalid();
         };
         let Some(object) = value.as_object() else {
@@ -123,6 +122,7 @@ fn refused(refusal: PairingRefusal) -> Reply {
     match refusal {
         PairingRefusal::Busy => pairing_busy(),
         PairingRefusal::Unavailable => pairing_unavailable(),
+        PairingRefusal::DeviceLimit => device_limit(),
     }
 }
 

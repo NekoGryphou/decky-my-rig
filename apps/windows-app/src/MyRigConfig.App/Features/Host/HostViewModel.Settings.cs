@@ -12,43 +12,38 @@ public partial class HostViewModel
     /// port is free.</summary>
     internal async Task ApplyPortAsync(int port, CancellationToken cancellationToken)
     {
-        if (!CanChangePort || !LocalControlProtocol.IsSettablePort(port) || port == CurrentPort) return;
-        int? owner;
-        try { owner = await Task.Run(() => HostNetwork.FindListener(port), cancellationToken); }
+        if (!CanChangePort || CurrentPort is not { } current) return;
+        PortCheck check;
+        try { check = await Task.Run(() => PortCheck.Of(port, current, probe), cancellationToken); }
         catch (System.ComponentModel.Win32Exception)
         {
             ShowFeedback(HostMessages.PortCheckFailed, MessageTone.Error);
             return;
         }
-        if (owner is { } listener)
+        if (check.Result == PortCheckResult.InUse)
         {
-            ShowFeedback(HostMessages.PortInUse(port, HostNetwork.ProcessName(listener)) + ".", MessageTone.Error);
+            ShowFeedback(SharedMessages.PortInUseSentence(port, check.Owner), MessageTone.Error);
             return;
         }
-        var confirmedHost = await BeginInteractionAsync(cancellationToken);
-        if (confirmedHost is null)
-        {
-            ShowFeedback(HostMessages.PortNotChanged, MessageTone.Error);
-            return;
-        }
-        try
-        {
-            var reply = await client.SetPortAsync(confirmedHost.Value, port, cancellationToken);
-            if (reply is not LocalControlPortReply saved || saved.Port != port)
-            {
-                ShowFeedback(HostMessages.PortNotChanged, MessageTone.Error);
-                return;
-            }
-        }
-        catch (HostControlException) when (!cancellationToken.IsCancellationRequested)
-        {
-            ShowFeedback(HostMessages.PortNotChanged, MessageTone.Error);
-            return;
-        }
-        finally { EndInteraction(); }
-
+        if (check.Result != PortCheckResult.Available) return;
+        var saved = false;
+        var confirmed = await InteractAsync(async host => saved = await SendPortAsync(host, port, cancellationToken),
+            HostMessages.PortNotChanged, cancellationToken);
+        if (!confirmed || !saved) return;
         await RefreshQuietlyAsync(cancellationToken);
         ShowFeedback(HostMessages.PortChanged(port), MessageTone.Success);
+    }
+
+    private async Task<bool> SendPortAsync(Guid host, int port, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reply = await client.SetPortAsync(host, port, cancellationToken);
+            if (reply is LocalControlPortReply saved && saved.Port == port) return true;
+        }
+        catch (HostControlException) when (!cancellationToken.IsCancellationRequested) { }
+        ShowFeedback(HostMessages.PortNotChanged, MessageTone.Error);
+        return false;
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
@@ -57,7 +52,7 @@ public partial class HostViewModel
         {
             if (CurrentPort is not { } current) return;
             if (await dialogs.AskPortAsync(current) is { } chosen) await ApplyPortAsync(chosen, cancellationToken);
-        });
+        }, HostMessages.PortNotChanged);
 
     /// <summary>After a rejected or canceled change, the switch shows the service's confirmed value
     /// again.</summary>
@@ -72,21 +67,26 @@ public partial class HostViewModel
     internal async Task SetTestModeAsync(bool enabled, CancellationToken cancellationToken)
     {
         if (!CanManage || enabled == TestModeOn) return;
-        var confirmedHost = await BeginInteractionAsync(cancellationToken);
-        if (confirmedHost is null)
-        {
-            ShowFeedback(HostMessages.TestModeChangeFailed, MessageTone.Error);
-            return;
-        }
+        if (!await InteractAsync(host => SendTestModeAsync(host, enabled, cancellationToken),
+                HostMessages.TestModeChangeFailed, cancellationToken)) return;
+        await RefreshQuietlyAsync(cancellationToken);
+    }
+
+    private async Task SendTestModeAsync(Guid host, bool enabled, CancellationToken cancellationToken)
+    {
         try
         {
-            var reply = await client.SetTestModeAsync(confirmedHost.Value, enabled, cancellationToken);
-            if (reply is LocalControlTestModeReply { TestMode: var saved } && saved == enabled)
-                TestModeOn = enabled;
+            var reply = await client.SetTestModeAsync(host, enabled, cancellationToken);
+            if (reply is LocalControlTestModeReply { TestMode: var saved } && saved == enabled) TestModeOn = enabled;
             else ShowFeedback(HostMessages.TestModeChangeFailed, MessageTone.Error);
         }
         catch (HostControlException) { ShowFeedback(HostMessages.TestModeChangeFailed, MessageTone.Error); }
-        finally { EndInteraction(); }
-        await RefreshQuietlyAsync(cancellationToken);
+    }
+
+    /// <summary>Logs a test-mode failure that escaped the command's own handling and tells the user.</summary>
+    internal void ReportTestModeFailed(Exception exception)
+    {
+        LogError(exception);
+        ShowFeedback(HostMessages.TestModeChangeFailed, MessageTone.Error);
     }
 }

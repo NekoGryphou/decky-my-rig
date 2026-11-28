@@ -86,6 +86,25 @@ impl Host {
         self.storage_healthy.store(false, Ordering::Release);
     }
 
+    /// The configuration as it is saved, to compare with what is on disk.
+    pub fn config_bytes(&self) -> Result<Vec<u8>, RegistryError> {
+        let config = self.config.read().map_err(|_| RegistryError::Unavailable)?;
+        config.to_json().map_err(|_| RegistryError::Unavailable)
+    }
+
+    /// Takes requests again once the saved copy reads back exactly as memory
+    /// holds it. Anything else, including a changed file, keeps them blocked.
+    pub fn restore_storage(&self, saved: &[u8]) -> bool {
+        let Ok(current) = self.config_bytes() else {
+            return false;
+        };
+        if current != saved {
+            return false;
+        }
+        self.storage_healthy.store(true, Ordering::Release);
+        true
+    }
+
     /// The saved port. The listener may still be rebinding to it.
     pub fn stored_port(&self) -> Result<u16, RegistryError> {
         let config = self.config.read().map_err(|_| RegistryError::Unavailable)?;

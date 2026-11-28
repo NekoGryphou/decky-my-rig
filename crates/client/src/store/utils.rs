@@ -1,5 +1,6 @@
 use super::{
     consts::{DEFAULT_PORT, SCHEMA_VERSION},
+    messages::{NOT_PRIVATE, OPEN_FAILED, READ_FAILED, TOO_LARGE},
     types::{
         Authentication, PcChanges, PcConfig, PcInput, StoredAuthentication, StoredDocument,
         StoredPc,
@@ -7,8 +8,9 @@ use super::{
 };
 use crate::shared::{PublicError, normalize_host, normalize_mac, normalize_name, normalize_port};
 use myrig_protocol::validation::{canonical_uuid, decode_hex, lower_hex};
-use std::collections::HashSet;
+use std::{collections::HashSet, io};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 pub(super) fn create(
     input: PcInput,
@@ -63,11 +65,13 @@ pub(super) fn decode(raw: &[u8]) -> Option<Vec<PcConfig>> {
         .then_some(pcs)
 }
 
-pub(super) fn encode(pcs: &[PcConfig]) -> serde_json::Result<Vec<u8>> {
+/// The document's bytes, which hold every token, in a buffer that wipes itself.
+pub(super) fn encode(pcs: &[PcConfig]) -> serde_json::Result<Zeroizing<Vec<u8>>> {
     serde_json::to_vec(&StoredDocument {
         schema_version: SCHEMA_VERSION,
         pcs: pcs.iter().map(to_stored).collect(),
     })
+    .map(Zeroizing::new)
 }
 
 fn from_stored(stored: StoredPc) -> Option<PcConfig> {
@@ -79,7 +83,7 @@ fn from_stored(stored: StoredPc) -> Option<PcConfig> {
         mac: normalize_mac(&stored.mac).ok()?,
         authentication: Authentication {
             host_id: canonical_uuid(&stored.authentication.host_id)?,
-            token: zeroize::Zeroizing::new(stored.authentication.token.clone()),
+            token: Zeroizing::new(stored.authentication.token.clone()),
             tls_pin: decode_hex::<32>(&stored.authentication.tls_pin)?,
         },
     };
@@ -101,5 +105,23 @@ fn to_stored(pc: &PcConfig) -> StoredPc {
             token: pc.authentication.token.to_string(),
             tls_pin: lower_hex(&pc.authentication.tls_pin),
         },
+    }
+}
+
+/// What a failed open of the settings directory means for the user.
+pub(super) fn open_error(error: io::Error) -> PublicError {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied => PublicError(NOT_PRIVATE),
+        _ => PublicError(OPEN_FAILED),
+    }
+}
+
+/// What a failed read of `pcs.json` means: a file that isn't private, one past
+/// the size limit, or plain I/O.
+pub(super) fn read_error(error: io::Error) -> PublicError {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied => PublicError(NOT_PRIVATE),
+        io::ErrorKind::InvalidData => PublicError(TOO_LARGE),
+        _ => PublicError(READ_FAILED),
     }
 }

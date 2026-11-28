@@ -1,9 +1,16 @@
 use super::{
     consts::{DEFAULT_PORT, REFUSED},
+    messages::SHUTDOWN_STUCK,
     types::{Command, Failure},
 };
-use crate::{shared::normalize_port, store::PcConfig};
-use std::path::PathBuf;
+use crate::{
+    shared::{PublicError, normalize_port},
+    store::PcConfig,
+};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 /// The command named by `arguments`, or `None` for a usage error.
 pub(super) fn parse(arguments: &[String]) -> Option<Command> {
@@ -74,4 +81,19 @@ pub(super) fn refused(message: impl Into<String>) -> Failure {
         code: REFUSED,
         message: message.into(),
     }
+}
+
+/// Stops `runtime`, waiting at most `bound` for its blocking tasks. A store
+/// write stuck behind another process's lock would otherwise keep the process
+/// alive for as long as that process holds it.
+pub(super) fn stop_runtime(
+    runtime: tokio::runtime::Runtime,
+    bound: Duration,
+) -> Result<(), PublicError> {
+    let started = Instant::now();
+    runtime.shutdown_timeout(bound);
+    if started.elapsed() >= bound {
+        return Err(PublicError(SHUTDOWN_STUCK));
+    }
+    Ok(())
 }

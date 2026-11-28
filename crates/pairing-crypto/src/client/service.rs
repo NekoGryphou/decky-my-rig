@@ -4,7 +4,10 @@ use crate::{
     identities, stretch,
 };
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters};
-use rand::rngs::OsRng;
+use rand::{
+    SeedableRng,
+    rngs::{StdRng, SysRng},
+};
 use zeroize::Zeroizing;
 
 impl ClientExchange {
@@ -23,8 +26,8 @@ impl ClientExchange {
         {
             return Err(ClientError::InvalidInput);
         }
-        let start =
-            ClientLogin::<Suite>::start(&mut OsRng, code).map_err(|_| ClientError::Internal)?;
+        let start = ClientLogin::<Suite>::start(&mut seeded_rng()?, code)
+            .map_err(|_| ClientError::Internal)?;
         let request = start
             .message
             .serialize()
@@ -55,7 +58,7 @@ impl ClientExchange {
         let finish = self
             .state
             .finish(
-                &mut OsRng,
+                &mut seeded_rng()?,
                 &self.code,
                 response,
                 ClientLoginFinishParameters::new(Some(&self.context), identities(), Some(&ksf)),
@@ -68,4 +71,10 @@ impl ClientExchange {
             .try_into()
             .map_err(|_| ClientError::Internal)
     }
+}
+
+/// Seeds a generator from the OS, reporting an entropy failure instead of
+/// panicking like `UnwrapErr(SysRng)` would.
+fn seeded_rng() -> Result<StdRng, ClientError> {
+    StdRng::try_from_rng(&mut SysRng).map_err(|_| ClientError::Internal)
 }

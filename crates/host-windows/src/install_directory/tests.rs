@@ -1,4 +1,9 @@
-use super::{InstallDirectory, native::decode, types::PathRole, utils::check_security};
+use super::{
+    InstallDirectory,
+    native::decode,
+    types::PathRole,
+    utils::{check_path, check_security},
+};
 use crate::shared::native::{LocalAllocation, wide};
 use std::path::Path;
 use windows::{
@@ -147,4 +152,82 @@ fn drive_admission_requires_a_fixed_volume_with_a_registered_drive_letter() {
     assert!(drive_is_registered("c:\\", &registered));
     assert!(!drive_is_registered("Z:\\", &registered));
     assert!(!drive_is_registered("S:\\", &[]));
+}
+
+#[test]
+fn every_windows_device_name_is_refused_with_or_without_an_extension() {
+    for name in [
+        "CON",
+        "con",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "com9",
+        "LPT1",
+        "lpt9",
+        "CONIN$",
+        "conout$",
+        "COM\u{b9}",
+        "CON .txt",
+        "con.txt",
+        "NUL.tar.gz",
+        "CONIN$.log",
+        "AUX  .x",
+    ] {
+        let path = format!(r"C:\Program Files\{name}\MyRig");
+        assert!(check_path(Path::new(&path)).is_err(), "{name}");
+    }
+    for name in [
+        "CONSOLE",
+        "COM0",
+        "COM10",
+        "LPT0",
+        "CONIN",
+        "MyRig.con",
+        "NULL",
+    ] {
+        let path = format!(r"C:\Program Files\{name}\MyRig");
+        assert!(check_path(Path::new(&path)).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn a_file_the_service_wrote_is_accepted_when_owner_rights_restrict_its_owner() {
+    // ! The service writes host.json as its token's default owner, LocalService, and the
+    // ! installer's OWNER RIGHTS entry is what stops that owner from changing the ACL. Refusing
+    // ! that file would fail every upgrade.
+    assert!(accepted(
+        "O:LSD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;RC;;;OW)",
+        PathRole::File
+    ));
+}
+
+#[test]
+fn a_local_service_owned_file_without_owner_rights_is_refused() {
+    // The owner could then rewrite its DACL.
+    assert!(!accepted("O:LSD:(A;;FA;;;SY)(A;;FA;;;BA)", PathRole::File));
+}
+
+#[test]
+fn a_local_service_owner_with_its_own_write_access_is_refused() {
+    assert!(!accepted(
+        "O:LSD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)",
+        PathRole::File
+    ));
+}
+
+#[test]
+fn an_inherited_entry_that_lets_users_write_is_refused() {
+    // ! A folder inherits its parent's ACEs, and those are most of what makes a folder writable by
+    // ! users. The decoder must see inherited entries, or a user-writable folder owned by
+    // ! administrators passes as a safe one.
+    assert!(!accepted(
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;ID;FA;;;BU)",
+        PathRole::Destination
+    ));
+    assert!(!accepted(
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;ID;FA;;;BU)",
+        PathRole::File
+    ));
 }

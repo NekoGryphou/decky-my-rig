@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs every check from WSL: the Linux checks, then the Windows ones on this PC,
-# reached through WSL interop.
+# - Runs every check from WSL: the Linux checks, then the Windows ones on this PC,
+#   reached through WSL interop.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

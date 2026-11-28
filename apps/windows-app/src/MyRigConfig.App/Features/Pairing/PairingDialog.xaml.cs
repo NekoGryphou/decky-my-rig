@@ -35,6 +35,7 @@ public sealed partial class PairingDialog : ContentDialog
             if (!closed && ViewModel.IsNameStep) NameBox.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
         }
         catch (OperationCanceledException) { }
+        catch (Exception) { ViewModel.FailUnexpectedly(); }
     }
 
     private async void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
@@ -48,6 +49,7 @@ public sealed partial class PairingDialog : ContentDialog
             if (!closed && ViewModel.IsCodeStep) timer.Start();
         }
         catch (OperationCanceledException) { }
+        catch (Exception) { ViewModel.FailUnexpectedly(); }
         finally { deferral.Complete(); }
     }
 
@@ -60,13 +62,27 @@ public sealed partial class PairingDialog : ContentDialog
             if (!ViewModel.IsCodeStep) timer.Stop();
         }
         catch (OperationCanceledException) { }
+        // ! An async void handler that throws takes the app down, so any other failure is shown in the dialog instead.
+        catch (Exception)
+        {
+            timer.Stop();
+            ViewModel.FailUnexpectedly();
+        }
     }
 
     private async void Dialog_Closed(ContentDialog sender, ContentDialogClosedEventArgs args)
     {
         closed = true;
         timer.Stop();
-        // * Closing the view model cancels its running steps and waits for them.
-        await ViewModel.CloseAsync();
+        // * Closing the view model cancels its running steps and waits for them. A failure here must not escape the
+        // * async void handler and crash the app.
+        try
+        {
+            await ViewModel.CloseAsync();
+        }
+        catch (Exception)
+        {
+            ViewModel.FailUnexpectedly();
+        }
     }
 }

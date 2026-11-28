@@ -40,7 +40,7 @@ export type EditorLoad = "loading" | "ready" | "missing";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
-/** One render of the editor: its state, refs and setters. */
+/** The editor's state, refs and setters; a new object only when state changes. */
 export interface SettingsEditorState {
   editingId: string | null;
   form: FormState;
@@ -53,6 +53,9 @@ export interface SettingsEditorState {
   alive: RefObject<boolean>;
   working: RefObject<boolean>;
   draft: RefObject<string | null>;
+  // * The newest state: callbacks that outlive a render (a modal's submit) read it here instead of
+  // * the render that created them.
+  latest: RefObject<SettingsEditorState | null>;
   setForm: Setter<FormState>;
   setStep: Setter<EditorStep>;
   setLoad: Setter<EditorLoad>;
@@ -62,14 +65,55 @@ export interface SettingsEditorState {
   setMacError: Setter<string>;
 }
 
-export interface EditorPartProps {
-  editor: SettingsEditorState;
-  disabled: boolean;
+/** What the editor's controls call; every function keeps its identity. */
+export interface EditorActions {
+  setField: (name: keyof FormState, value: string) => void;
+  detect: () => void;
+  pairAgain: () => void;
+  remove: () => void;
+  submit: () => void;
+  leave: () => void;
 }
 
-export interface TextRowProps extends EditorPartProps {
+export interface HeaderActionsProps {
+  editingId: string | null;
+  name: string;
+  disabled: boolean;
+  actions: EditorActions;
+}
+
+export interface EditorFieldsProps {
+  form: FormState;
+  step: EditorStep;
+  editingId: string | null;
+  paired: boolean;
+  macError: string;
+  disabled: boolean;
+  actions: EditorActions;
+}
+
+export interface FormActionsProps {
+  step: EditorStep;
+  editingId: string | null;
+  operation: SettingsOperation;
+  disabled: boolean;
+  actions: EditorActions;
+}
+
+export interface TextRowProps {
   label: string;
   name: keyof FormState;
+  value: string;
+  disabled: boolean;
   numeric?: boolean;
   locked?: boolean;
+  onField: EditorActions["setField"];
+}
+
+export interface MacRowProps {
+  value: string;
+  macError: string;
+  disabled: boolean;
+  onField: EditorActions["setField"];
+  onDetect: EditorActions["detect"];
 }

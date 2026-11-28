@@ -7,8 +7,13 @@ fn main() -> std::process::ExitCode {
 #[cfg(windows)]
 fn main() -> std::process::ExitCode {
     use myrig_host::{command::parse_command, output::messages, shared::CliError};
-    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let command = match parse_command(&arguments) {
+    // ! args() panics on a non-Unicode argument; a non-Unicode argument is a usage error, like any
+    // ! other unknown input.
+    let arguments = std::env::args_os()
+        .skip(1)
+        .map(|argument| argument.into_string().ok())
+        .collect::<Option<Vec<String>>>();
+    let command = match arguments.as_deref().and_then(parse_command) {
         Some(command) => command,
         None => {
             eprintln!("{}", messages::USAGE);

@@ -17,6 +17,23 @@ fn main() -> std::process::ExitCode {
         };
     }
     #[cfg(windows)]
+    if let [command, folders @ ..] = args.as_slice()
+        && command == "check-data"
+        && !folders.is_empty()
+    {
+        for folder in folders {
+            if let Err(error) =
+                myrig_host_windows::install_directory::InstallDirectory::validate_data_folder(
+                    Path::new(folder),
+                )
+            {
+                eprintln!("{error}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
+    #[cfg(windows)]
     if let [command, directories @ ..] = args.as_slice()
         && command == "create-data"
         && !directories.is_empty()

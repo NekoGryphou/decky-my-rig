@@ -81,8 +81,8 @@ where
                     }
                     Err(error) => break Err(error),
                 };
-                // ? Clean up finished tasks before checking whether we're full;
-                //   there's no queue of waiting sockets.
+                // ? Clean up finished tasks before checking whether we're full; there's no queue of
+                // ? waiting sockets.
                 while let Some(done) = connections.try_join_next_with_id() {
                     if let Some(id) = finished_id(&done) { peers.remove(&id); }
                 }
@@ -229,8 +229,7 @@ async fn handle(request: Request<Incoming>, host: &Arc<Host>, binding: [u8; 32])
     let test = match route {
         Route::Shutdown { test } => test,
         Route::Unpair => {
-            // ? The save writes a protected file, so keep it off the runtime
-            //   thread.
+            // ? The save writes a protected file, so keep it off the runtime thread.
             let (owner, token) = (host.clone(), zeroize::Zeroizing::new(token.to_owned()));
             let revoked = tokio::task::spawn_blocking(move || owner.revoke_own(&token)).await;
             return match revoked {
@@ -244,7 +243,7 @@ async fn handle(request: Request<Incoming>, host: &Arc<Host>, binding: [u8; 32])
         }
         Route::Status => return status(host),
     };
-    shutdown::handle(host, &bytes, authenticated_device, test)
+    shutdown::handle(host, &bytes, authenticated_device, test).await
 }
 
 fn status(host: &Host) -> Reply {

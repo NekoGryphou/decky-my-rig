@@ -1,11 +1,15 @@
 use super::{
-    consts::{IDLE_POLL, STEADY_POLL, TRANSITION_POLL},
+    consts::{CREDENTIAL_DRAIN, DRAIN_TIMEOUT, IDLE_POLL, STEADY_POLL, TRANSITION_POLL},
     messages::OPERATION_FAILED,
 };
 use crate::{shared::PublicError, store::PcChanges};
 use serde_json::Value;
 use std::time::Duration;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use tokio::{
+    io::{AsyncBufRead, AsyncBufReadExt},
+    task::JoinSet,
+    time::timeout,
+};
 
 pub(super) fn text<'a>(params: &'a Value, name: &str) -> Result<&'a str, PublicError> {
     params[name].as_str().ok_or(PublicError(OPERATION_FAILED))
@@ -99,4 +103,19 @@ pub(super) fn poll_interval(transition: bool, attended: bool) -> Duration {
     } else {
         IDLE_POLL
     }
+}
+
+/// Waits for the requests still running when stdin closed, then drops the rest.
+/// `holding_credential` says whether a pairing has a credential the PC issued
+/// that isn't stored yet; that pairing is given time to store or revoke it,
+/// since dropping it would leave the PC with a device that can't use it.
+pub(super) async fn drain(requests: &mut JoinSet<()>, holding_credential: impl Fn() -> bool) {
+    if timeout(DRAIN_TIMEOUT, join_all(requests)).await.is_err() && holding_credential() {
+        let _ = timeout(CREDENTIAL_DRAIN, join_all(requests)).await;
+    }
+    requests.shutdown().await;
+}
+
+async fn join_all(requests: &mut JoinSet<()>) {
+    while requests.join_next().await.is_some() {}
 }

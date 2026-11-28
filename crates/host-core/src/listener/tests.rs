@@ -1,7 +1,4 @@
-use super::{
-    utils::{self, run_with},
-    *,
-};
+use super::{service::run_with, *};
 use crate::{
     host::Host,
     paired_devices::RegistryConfig,
@@ -16,6 +13,13 @@ impl Power for NoPower {
     fn schedule_shutdown(&self) -> Result<(), PowerError> {
         panic!("listener test must not schedule power")
     }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        panic!("listener test must not cancel power")
+    }
+}
+
+fn bind_any(port: u16) -> io::Result<std::net::TcpListener> {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
 }
 
 fn fixture_host(port: u16) -> Arc<Host> {
@@ -55,7 +59,7 @@ async fn start_on_occupied_port() -> (
     let task = tokio::spawn(run(
         host.clone(),
         fixture_identity(),
-        utils::bind_any,
+        bind_any,
         stop_rx,
         move |_, error| {
             let _ = errors_tx.send(error.kind());
@@ -71,15 +75,49 @@ async fn start_on_occupied_port() -> (
 
 #[tokio::test]
 async fn a_port_freed_later_is_bound_again_without_a_port_change() {
-    let (occupied, host, stop_tx, mut errors_rx, task) = start_on_occupied_port().await;
+    let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let host = fixture_host(occupied.local_addr().unwrap().port());
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let (errors_tx, mut errors_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (served_tx, mut served_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut calls = 0;
+    let task = tokio::spawn(run_with(
+        host.clone(),
+        bind_any,
+        stop_rx,
+        move |_, error: &io::Error| {
+            let _ = errors_tx.send(error.kind());
+        },
+        move |listener, _port, stop: super::types::ListenerStop| {
+            calls += 1;
+            let call = calls;
+            let _ = served_tx.send(call);
+            async move {
+                // - The first serve ends cleanly, so the loop binds once more.
+                drop(listener);
+                if call > 1 {
+                    stop.await;
+                }
+                Ok(())
+            }
+        },
+    ));
+    let kind = tokio::time::timeout(Duration::from_secs(2), errors_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kind, io::ErrorKind::AddrInUse);
     drop(occupied);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while host.listener_state() != "listening" {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the listener must retry the bind on its own");
+    // - The second serve proves the listener kept running after the first
+    //   success; a repeated report would be queued by now.
+    for expected in [1, 2] {
+        let call = tokio::time::timeout(Duration::from_secs(5), served_rx.recv())
+            .await
+            .expect("the listener must retry the bind on its own")
+            .unwrap();
+        assert_eq!(call, expected);
+    }
+    assert_eq!(host.listener_state(), "listening");
     // - One report per failure streak, not one per retry.
     assert!(errors_rx.try_recv().is_err());
     stop_tx.send(true).unwrap();
@@ -141,15 +179,18 @@ async fn accept_failures_rebind_and_report_once_per_streak() {
     drop(free);
     let (stop_tx, stop_rx) = watch::channel(false);
     let reports = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let serves = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let (recorded, counted) = (reports.clone(), serves.clone());
+    let (served_tx, mut served_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut calls = 0;
+    let recorded = reports.clone();
     let task = tokio::spawn(run_with(
         host.clone(),
-        utils::bind_any,
+        bind_any,
         stop_rx,
         move |_, error: &io::Error| recorded.lock().unwrap().push(error.to_string()),
         move |listener, _port, stop: super::types::ListenerStop| {
-            let call = counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let call = calls;
+            calls += 1;
+            let _ = served_tx.send(call);
             async move {
                 // - A bound listener whose accept loop ends right away, like with
                 //   EMFILE.
@@ -163,9 +204,7 @@ async fn accept_failures_rebind_and_report_once_per_streak() {
         },
     ));
     tokio::time::timeout(Duration::from_secs(10), async {
-        while serves.load(std::sync::atomic::Ordering::SeqCst) < 3 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        while served_rx.recv().await != Some(2) {}
     })
     .await
     .expect("the listener must rebind after accept failures");

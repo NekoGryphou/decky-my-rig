@@ -5,9 +5,9 @@ begin
   if Result <> '' then Result := RemoveBackslashUnlessRoot(ExpandFileName(Result));
 end;
 
-// Any user can create folders in ProgramData, so a marker file proves nothing alone.
-// The data must also be recorded in HKLM, which only administrators can write.
-// The uninstall key is not proof either: it can remain after the data is removed.
+// ? Any user can create folders in ProgramData, so a marker file proves nothing alone. The data
+// ? must also be recorded in HKLM, which only administrators can write. The uninstall key is not
+// ? proof either: it can remain after the data is removed.
 function DataRecorded: Boolean;
 begin
   Result := RegValueExists(HKLM, OwnershipKey, DataOwnedValue);
@@ -30,11 +30,21 @@ begin
   VerifyOwnedDirectory(SecurityDirectory);
 end;
 
+// - The record says the data is ours, but only while a folder exists to hold it.
+//   Without the folders it is stale, and it must not survive to vouch for the next
+//   folder anyone creates in that place.
+procedure ClearStaleOwnership;
+begin
+  if not DirExists(ConfigDirectory) and not DirExists(SecurityDirectory) then
+    RegDeleteValue(HKLM, OwnershipKey, DataOwnedValue);
+end;
+
 procedure ProtectDirectory(Path, ServiceRights: String);
 begin
   if not ForceDirectories(Path) then RaiseException(ConfigurationDirectoryFailed);
+  // ! No /reset here: it would restore the parent's inherited ACEs (Users may create subfolders on
+  // ! ProgramData) until /inheritance:r removes them again.
   RunRequired(SystemTool('icacls.exe'), Quoted(Path) + ' /setowner *S-1-5-32-544');
-  RunRequired(SystemTool('icacls.exe'), Quoted(Path) + ' /reset');
   RunRequired(SystemTool('icacls.exe'), Quoted(Path) + ' /inheritance:r');
   RunRequired(SystemTool('icacls.exe'), Quoted(Path) +
     ' /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F ' + '*S-1-3-4:(OI)(CI)(RC) ' +
@@ -58,10 +68,10 @@ begin
     RaiseException(ConfigurationOwnershipUnrecorded);
 end;
 
-// OWNER RIGHTS (S-1-3-4) limits an owner to reading the ACL. The service's token
-// is the default owner of host.json, and other LocalService services share it.
-// Re-protecting a file can leave it with an empty DACL, and taking ownership
-// works whatever the DACL says. The grants below then restore access.
+// ? OWNER RIGHTS (S-1-3-4) limits an owner to reading the ACL. The service's token is the default
+// ? owner of host.json, and other LocalService services share it. Re-protecting a file can leave it
+// ? with an empty DACL, and taking ownership works whatever the DACL says. The grants below then
+// ? restore access.
 procedure ProtectFile(Path, ServiceRights: String);
 begin
   RunRequired(SystemTool('takeown.exe'), '/F ' + Quoted(Path) + ' /A');
@@ -71,7 +81,7 @@ begin
     Quoted(ServiceAccount + ':' + ServiceRights));
 end;
 
-// Runs myrig-setup with Arguments; a refusal raises setup's own message.
+// - Runs myrig-setup with Arguments; a refusal raises setup's own message.
 procedure RunSetup(Arguments: String);
 var
   ExitCode, I: Integer;
@@ -88,9 +98,17 @@ begin
   RaiseException(Message);
 end;
 
-// Fresh folders are created closed to everyone but SYSTEM and Administrators,
-// so no user can plant files in them first. A folder that appeared after
-// PrepareToInstall is refused, not adopted.
+// ? An existing folder is adopted only when myrig-setup confirms its owner and access: the marker
+// ? file alone can be written by any user who creates the folder.
+procedure VerifyOwnedFolderAccess;
+begin
+  if DirExists(ConfigDirectory) or DirExists(SecurityDirectory) then
+    RunSetup('check-data ' + Quoted(ConfigDirectory) + ' ' + Quoted(SecurityDirectory));
+end;
+
+// ? Fresh folders are created closed to everyone but SYSTEM and Administrators, so no user can
+// ? plant files in them first. A folder that appeared after PrepareToInstall is refused, not
+// ? adopted.
 procedure CreateProtectedData;
 begin
   RunSetup('create-data ' + Quoted(ConfigDirectory) + ' ' + Quoted(SecurityDirectory) +
@@ -106,8 +124,8 @@ begin
   SecurityPath := SecurityDirectory + '\Security\host-security.json';
   if FileExists(ConfigPath) <> FileExists(SecurityPath) then
     RaiseException(IdentityIncomplete);
-  // An existing configuration is protected from administrators too; the
-  // service validates it when it starts.
+  // ? An existing configuration is protected from administrators too; the service validates it when
+  // ? it starts.
   if not FileExists(ConfigPath) then
     RunSetup('init ' + Quoted(ConfigPath) + ' ' + Quoted(SecurityPath) + ' ' + FirstPort);
   ProtectFile(ConfigPath, 'M');

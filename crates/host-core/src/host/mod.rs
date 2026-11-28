@@ -4,6 +4,8 @@ mod pair_request;
 mod pairing;
 mod registry;
 mod service;
+#[cfg(test)]
+mod tests;
 mod types;
 mod utils;
 

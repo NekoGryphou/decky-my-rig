@@ -1,5 +1,5 @@
 use super::{
-    consts::{MAX_CERTIFICATE_BYTES, MAX_KEY_BYTES, MAX_SECURITY_BYTES, SCHEMA_VERSION},
+    consts::{MAX_KEY_BYTES, MAX_SECURITY_BYTES, MAX_STORED_CERTIFICATE_BYTES, SCHEMA_VERSION},
     messages::FAILURE,
     types::{HostSecurity, NewSecurity, SecretString, StoredSecurity},
 };
@@ -26,12 +26,12 @@ impl HostSecurity {
         {
             return Err(FAILURE);
         }
-        let certificate =
-            decode_hex_bytes(&stored.certificate_der, MAX_CERTIFICATE_BYTES).ok_or(FAILURE)?;
+        let certificate = decode_hex_bytes(&stored.certificate_der, MAX_STORED_CERTIFICATE_BYTES)
+            .ok_or(FAILURE)?;
         let mut key =
             decode_hex_bytes(&stored.private_key_pkcs8.0, MAX_KEY_BYTES).ok_or(FAILURE)?;
-        // ! Move the only decoded copy of the key into rustls's owned secret
-        //   type. The text copies along the way are wiped on every return path.
+        // ! Move the only decoded copy of the key into rustls's owned secret type. The text copies
+        // ! along the way are wiped on every return path.
         let identity =
             FixedIdentity::from_der(vec![certificate.to_vec()], std::mem::take(&mut *key))
                 .map_err(|_| FAILURE)?;

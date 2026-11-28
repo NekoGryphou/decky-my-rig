@@ -1,4 +1,5 @@
 use super::super::{errors::*, types::*, utils::session_pending};
+use crate::paired_devices::RegistryConfig;
 use myrig_pairing_crypto::{
     CONFIRMATION_LEN, REQUEST_LEN,
     session::{ApprovedSession, AttemptId, Error as CryptoError},
@@ -11,9 +12,8 @@ use std::{
 
 impl Drop for PairingReservation {
     fn drop(&mut self) {
-        // ! Releasing a claim mustn't depend on other code not panicking. A
-        //   poisoned lock still holds valid flags, and stopping the service waits
-        //   on this.
+        // ! Releasing a claim mustn't depend on other code not panicking. A poisoned lock still
+        // ! holds valid flags, and stopping the service waits on this.
         self.0
             .pairing
             .lock()
@@ -39,8 +39,7 @@ impl Host {
     /// TLS certificate, and a fresh OS-random code, nonce and credential. No
     /// route exposes this, and the pairing lock is never held during crypto or
     /// saves.
-    // ? These are the inputs listed above. There's only one production caller, so
-    //   a wrapper struct wouldn't help.
+    // ? The inputs are passed flat: one production caller, so no wrapper struct.
     #[allow(clippy::too_many_arguments)]
     pub async fn open_secure_pairing(
         self: &Arc<Self>,
@@ -49,7 +48,7 @@ impl Host {
         code: &str,
         nonce: [u8; 32],
         certificate_der: &[u8],
-        entropy: [u8; 32],
+        entropy: &[u8; 32],
         device_id: uuid::Uuid,
         persist: PairingPersistence,
     ) -> Result<(), OpenPairingError> {
@@ -67,9 +66,8 @@ impl Host {
             return Err(OpenPairingError::Busy);
         }
         let registry = {
-            // ? A claimed save can hold registry_mutation while it waits for
-            //   storage. Don't make the async caller wait behind it just to find
-            //   out it's busy.
+            // ? A claimed save can hold registry_mutation while it waits for storage. Don't make
+            // ? the async caller wait behind it just to find out it's busy.
             let _mutation = self
                 .registry_mutation
                 .try_lock()
@@ -96,20 +94,17 @@ impl Host {
             if state.busy {
                 return Err(OpenPairingError::Busy);
             }
-            // ! A code someone has guessed at stays until it expires or is
-            //   closed, so nobody can swap it for a fresh one to get more
-            //   guesses.
+            // ! A code someone has guessed at stays until it expires or is closed, so nobody can
+            // ! swap it for a fresh one to get more guesses.
             if session_pending(&mut state, Instant::now())
-                && state
-                    .session
-                    .as_ref()
-                    .is_some_and(|session| !session.crypto.untouched())
+                && state.session.as_ref().is_some_and(|session| {
+                    !session.crypto.untouched() && !session.crypto.exhausted()
+                })
             {
                 return Err(OpenPairingError::Busy);
             }
-            // * Replacing an unclaimed approval drops its code and credential
-            //   before the next one is prepared. A preparation or save in
-            //   progress keeps ownership.
+            // * Replacing an unclaimed approval drops its code and credential before the next one
+            // * is prepared. A preparation or save in progress keeps ownership.
             state.session = None;
             state.closed = false;
             state.busy = true;
@@ -122,7 +117,7 @@ impl Host {
         };
         let reservation = PairingReservation(self.clone());
         let code = zeroize::Zeroizing::new(code.as_bytes().to_vec());
-        let entropy = zeroize::Zeroizing::new(entropy);
+        let entropy = zeroize::Zeroizing::new(*entropy);
         let cert = certificate_der.to_vec();
         let leaf_digest = Sha256::digest(certificate_der).into();
         tokio::task::spawn_blocking(move || {
@@ -179,9 +174,9 @@ impl Host {
         if !self.storage_healthy() {
             return Err(PairingRefusal::Unavailable);
         }
-        // ! The code was opened for this host's certificate, so a code from
-        //   before an identity change isn't used. The OPAQUE context ties the
-        //   exchange to that certificate and the nonce.
+        // ! The code was opened for this host's certificate, so a code from before an identity
+        // ! change isn't used. The OPAQUE context ties the exchange to that certificate and the
+        // ! nonce.
         let usable = state.session.as_ref().is_some_and(|s| {
             s.leaf_digest == binding && attempt.is_none_or(|id| s.crypto.holds_attempt(id))
         });
@@ -198,24 +193,23 @@ impl Host {
         request: &[u8],
         binding: [u8; 32],
     ) -> Result<SecureChallenge, PairingRefusal> {
-        // ! Check the size before taking ownership. A malformed request still
-        //   uses up an attempt, by sending a fixed, invalid empty frame.
+        // ! Check the size before taking ownership. A malformed request still uses up an attempt,
+        // ! by sending a fixed, invalid empty frame.
         let request = if request.len() == REQUEST_LEN {
             request.to_vec()
         } else {
             Vec::new()
         };
         let (mut session, reservation) = self.claim_secure(binding, None)?;
-        // ! Every guess counts until a pairing succeeds, whatever code it was
-        //   for.
+        // ! Every guess counts until a pairing succeeds, whatever code it was for.
         if let Some(mut state) = self.pairing_state() {
             state.failed_starts = state.failed_starts.saturating_add(1);
         }
         tokio::task::spawn_blocking(move || {
             let challenge = match session.crypto.start(&request) {
                 Err(CryptoError::Closed) => return None,
-                // ! A used-up code is kept, closed to guesses, until it expires.
-                //   Dropping it would let a new request open a fresh one.
+                // ! A used-up code is kept, closed to guesses, until it expires. Dropping it would
+                // ! let a new request open a fresh one.
                 Err(CryptoError::Limit) => {
                     let _ = reservation.0.restore_secure(session);
                     return None;
@@ -250,28 +244,39 @@ impl Host {
         };
         let (mut session, reservation) = self.claim_secure(binding, Some(attempt))?;
         tokio::task::spawn_blocking(move || {
+            // ! The registry is checked before the one-shot proof is used, so a full registry
+            // ! doesn't burn the code: the device can try again once the owner removes a device.
+            if let Err(refusal) = reservation
+                .0
+                .registry_candidate(&session.registry, previous.as_deref().map(String::as_str))
+            {
+                let _ = reservation.0.restore_secure(session);
+                return Err(refusal);
+            }
             match session.crypto.finish(attempt, &confirmation) {
-                Err(CryptoError::Closed) => return None,
+                Err(CryptoError::Closed) => return Err(PairingRefusal::Unavailable),
                 Err(_) => {
                     let _ = reservation.0.restore_secure(session);
-                    return None;
+                    return Err(PairingRefusal::Unavailable);
                 }
                 Ok(_authenticated) => {}
             }
-            // ! Authentication consumes the OPAQUE session before issuing
-            //   anything. Closing before this check drops unclaimed work; a save
-            //   that was already let in is waited for.
-            if reservation.0.pairing_state()?.closed {
-                return None;
+            // ! Authentication consumes the OPAQUE session before issuing anything. Closing before
+            // ! this check drops unclaimed work; a save that was already let in is waited for.
+            if reservation
+                .0
+                .pairing_state()
+                .ok_or(PairingRefusal::Unavailable)?
+                .closed
+            {
+                return Err(PairingRefusal::Unavailable);
             }
             reservation
                 .0
                 .issue_registry_token(session.token, session.registry, previous)
         })
         .await
-        .ok()
-        .flatten()
-        .ok_or(PairingRefusal::Unavailable)
+        .map_err(|_| PairingRefusal::Unavailable)?
     }
 
     pub fn secure_pairing_info(&self, binding: [u8; 32]) -> Result<[u8; 32], PairingRefusal> {
@@ -290,53 +295,72 @@ impl Host {
             .ok_or(PairingRefusal::Unavailable)
     }
 
+    /// The registry as it would be after this device pairs, or why it can't be.
+    fn registry_candidate(
+        &self,
+        registry: &RegistryPairing,
+        previous: Option<&str>,
+    ) -> Result<RegistryConfig, PairingRefusal> {
+        let mut candidate = self
+            .config
+            .read()
+            .map_err(|_| PairingRefusal::Unavailable)?
+            .clone();
+        // * A re-pairing device names its old credential, which gets revoked in the same save that
+        // * adds the new one.
+        if let Some(previous) = previous {
+            candidate.revoke_token(previous);
+        }
+        if candidate.is_full() {
+            return Err(PairingRefusal::DeviceLimit);
+        }
+        candidate
+            .insert_credential(registry.device_id, &registry.name, registry.digest)
+            .map_err(|_| PairingRefusal::Unavailable)?;
+        Ok(candidate)
+    }
+
     pub(crate) fn issue_registry_token(
         &self,
         token: zeroize::Zeroizing<String>,
         registry: RegistryPairing,
         previous: Option<zeroize::Zeroizing<String>>,
-    ) -> Option<zeroize::Zeroizing<String>> {
-        let _mutation = self.registry_mutation.lock().ok()?;
+    ) -> Result<zeroize::Zeroizing<String>, PairingRefusal> {
+        let unavailable = || PairingRefusal::Unavailable;
+        let _mutation = self.registry_mutation.lock().map_err(|_| unavailable())?;
         if !self.storage_healthy() {
-            return None;
+            return Err(unavailable());
         }
-        let mut candidate = self.config.read().ok()?.clone();
-        // * A re-pairing device names its old credential, which gets revoked in
-        //   the same save that adds the new one.
-        if let Some(previous) = previous {
-            candidate.revoke_token(&previous);
-        }
-        candidate
-            .insert_credential(registry.device_id, &registry.name, registry.digest)
-            .ok()?;
-        let bytes = candidate.to_json().ok()?;
+        let candidate =
+            self.registry_candidate(&registry, previous.as_ref().map(|token| token.as_str()))?;
+        let bytes = candidate.to_json().map_err(|_| unavailable())?;
         let saved =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (registry.persist)(&bytes)));
         let saved = match saved {
             Ok(saved) => saved,
             Err(_) => {
                 self.require_storage_recovery();
-                return None;
+                return Err(unavailable());
             }
         };
         if let Err(error) = saved {
             if error != PersistError::Unchanged {
                 self.require_storage_recovery();
             }
-            return None;
+            return Err(unavailable());
         }
         match self.config.write() {
             Ok(mut config) => *config = candidate,
             Err(_) => {
                 self.require_storage_recovery();
-                return None;
+                return Err(unavailable());
             }
         }
         if let Some(mut state) = self.pairing_state() {
             state.failed_starts = 0;
         }
         // ! The caller only gets the bearer token once the save succeeded.
-        Some(token)
+        Ok(token)
     }
 
     /// Stopping the service waits for a save that has already started, even if
@@ -363,8 +387,8 @@ impl Host {
     /// Stop new openers before closing and waiting.
     pub fn close_pairing(&self) {
         if let Some(mut state) = self.pairing_state() {
-            // ! This invalidates approval callbacks sent before the close, even
-            //   if their worker hasn't reached the host yet.
+            // ! This invalidates approval callbacks sent before the close, even if their worker
+            // ! hasn't reached the host yet.
             state.generation = state.generation.wrapping_add(1);
             state.closed = true;
             state.session = None;

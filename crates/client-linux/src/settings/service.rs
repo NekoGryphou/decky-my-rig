@@ -3,13 +3,13 @@ use super::{
     native::{current_uid, open_at, rename_at, unlink_at},
     types::LinuxSettings,
 };
-use myrig_client::platform::{Settings, is_temporary_document, temporary_document_name};
+use myrig_client::platform::{Settings, remove_leftover_documents, temporary_document_name};
+use myrig_client::shared::read_bounded;
 use std::{
     ffi::CString,
     fs::{self, DirBuilder, File, OpenOptions, Permissions},
-    io::{self, Read, Write},
+    io::{self, Write},
     os::unix::{
-        ffi::OsStrExt,
         fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
         io::AsRawFd,
     },
@@ -56,7 +56,7 @@ impl Settings for LinuxSettings {
             libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK,
             0,
         );
-        let mut file = match opened {
+        let file = match opened {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             other => other?,
         };
@@ -65,18 +65,18 @@ impl Settings for LinuxSettings {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
         file.set_permissions(Permissions::from_mode(0o600))?;
-        let mut raw = Vec::new();
-        (&mut file).take(limit as u64 + 1).read_to_end(&mut raw)?;
-        if raw.len() > limit {
-            return Err(io::ErrorKind::InvalidData.into());
-        }
-        Ok(Some(raw))
+        read_bounded(file, limit).map(Some)
     }
 
     /// Writes a private temp file, syncs it and renames it over `pcs.json`, all
     /// relative to the open directory.
     fn replace(&self, contents: &[u8]) -> io::Result<()> {
-        remove_leftovers(&self.directory);
+        // ? The open descriptor's path, so the directory can't be swapped for another between
+        // ? opening and cleaning.
+        remove_leftover_documents(Path::new(&format!(
+            "/proc/self/fd/{}",
+            self.directory.as_raw_fd()
+        )));
         let temporary = CString::new(temporary_document_name())
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW;
@@ -94,21 +94,6 @@ impl Settings for LinuxSettings {
         // * The rename already happened; a failed directory sync can't undo it.
         let _ = self.directory.sync_all();
         Ok(())
-    }
-}
-
-/// Deletes temp files left by killed saves. Runs under the store lock.
-fn remove_leftovers(directory: &File) {
-    let Ok(entries) = fs::read_dir(format!("/proc/self/fd/{}", directory.as_raw_fd())) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if name.to_str().is_some_and(is_temporary_document)
-            && let Ok(name) = CString::new(name.as_bytes())
-        {
-            let _ = unlink_at(directory, &name);
-        }
     }
 }
 

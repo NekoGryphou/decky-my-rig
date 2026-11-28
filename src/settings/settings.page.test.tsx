@@ -47,6 +47,60 @@ beforeEach(() => {
   resetDeckyMocks();
 });
 
+describe("Settings attention", () => {
+  it("holds attention on the editor and across Settings to Editor", async () => {
+    const settings = render(<SettingsPage />);
+    await waitFor(() => expect(mocks.attention).toHaveBeenLastCalledWith(true));
+    mocks.attention.mockClear();
+    settings.unmount();
+    const editor = render(<SettingsEditorPage />);
+    // - The page change must not tell the agent the plugin left.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.attention).not.toHaveBeenCalled();
+    editor.unmount();
+    await waitFor(() =>
+      expect(mocks.attention).toHaveBeenLastCalledWith(false),
+    );
+  });
+});
+
+describe("Settings list", () => {
+  const show = () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  it("loads the list again when the page is shown after a failure", async () => {
+    mocks.settings.mockRejectedValueOnce(new Error("backend reloading"));
+    render(<SettingsPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not update PC settings.",
+    );
+    mocks.settings.mockResolvedValue([pc]);
+    act(show);
+    await screen.findByRole("button", { name: `Edit ${pc.name}` });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.settings).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes only the status text when the power state changes", async () => {
+    mocks.settings.mockResolvedValue([pc]);
+    powerService.start();
+    await emitPowerSnapshot([{ id: pc.id, name: pc.name, state: "online" }]);
+    render(<SettingsPage />);
+    await screen.findByText(`Online · ${pc.host}`);
+    mocks.fieldRender.mockClear();
+    await emitPowerSnapshot([{ id: pc.id, name: pc.name, state: "offline" }]);
+    expect(screen.getByText(`Offline · ${pc.host}`)).toBeInTheDocument();
+    expect(mocks.fieldRender).not.toHaveBeenCalled();
+  });
+});
+
 describe("Settings routes", () => {
   function codeModal() {
     const element = mocks.modal.mock.lastCall?.[0] as ReactElement<{

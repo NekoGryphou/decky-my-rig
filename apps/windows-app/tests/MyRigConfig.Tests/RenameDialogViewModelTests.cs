@@ -39,19 +39,19 @@ public sealed class RenameDialogViewModelTests
         using var fixture = System.Text.Json.JsonDocument.Parse(
             File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "names.json")));
         foreach (var name in fixture.RootElement.GetProperty("valid").EnumerateArray())
-            Assert.IsTrue(LocalControlProtocol.IsValidName(name.GetString()), name.GetString());
+            Assert.IsTrue(LocalControlProtocolService.IsValidName(name.GetString()), name.GetString());
         foreach (var invalid in fixture.RootElement.GetProperty("invalid").EnumerateArray())
-            Assert.IsFalse(LocalControlProtocol.IsValidName(invalid.GetProperty("name").GetString()),
+            Assert.IsFalse(LocalControlProtocolService.IsValidName(invalid.GetProperty("name").GetString()),
                 invalid.GetProperty("why").GetString());
     }
 
     [TestMethod]
     public void NameRuleMatchesTheService()
     {
-        Assert.IsTrue(LocalControlProtocol.IsValidName("Salon – Steam Deck 🎮"));
+        Assert.IsTrue(LocalControlProtocolService.IsValidName("Salon – Steam Deck 🎮"));
         foreach (var name in new[] { " Device", "Device\n", "Device​", "⁦Device⁩", "﻿Device", "Device­" })
-            Assert.IsFalse(LocalControlProtocol.IsValidName(name), name);
+            Assert.IsFalse(LocalControlProtocolService.IsValidName(name), name);
         Assert.ThrowsException<System.Text.Json.JsonException>(() =>
-            LocalControlProtocol.RenameRequest(Guid.Empty, Guid.Empty, "Device‮"));
+            LocalControlProtocolService.RenameRequest(Guid.Empty, Guid.Empty, "Device‮"));
     }
 }

@@ -9,13 +9,33 @@ namespace MyRigConfig.Tests;
 [TestClass]
 public sealed class HostNoticeTests
 {
-    private static readonly Guid HostId = Guid.Parse("03c85317-9d93-4fb3-a04b-91a0e16668c6");
-
     private static HostViewModel Model(Func<byte[]> exchange) =>
-        new(new HostControlClient((_, sending, _) => { sending(); return Task.FromResult(exchange()); }),
-            _ => Task.FromResult(new HostObservation(ServiceState.Running,
-                new HostStatus(47991, false, "listening"), null)),
-            TimeProvider.System);
+        TestHost.Model(new HostControlClientService((_, sending, _) => { sending(); return Task.FromResult(exchange()); }));
+
+    [TestMethod]
+    public void NoticeShowsTheMostImportantCondition()
+    {
+        var conflict = new PortConflict(47991, "OtherApp");
+        Assert.AreEqual(HostMessages.MissingTitle,
+            HostHelpers.SelectNotice(ServiceState.NotInstalled, conflict, true, true, true, true)?.Title);
+        Assert.AreEqual(HostMessages.PortInUse(47991, "OtherApp"),
+            HostHelpers.SelectNotice(ServiceState.Stopped, conflict, true, false, false, true)?.Title);
+        Assert.AreEqual(HostMessages.ListenerUnavailable,
+            HostHelpers.SelectNotice(ServiceState.Running, null, true, true, true, true)?.Title);
+        // - Just a title: the port setting is right below it.
+        Assert.AreEqual("", HostHelpers.SelectNotice(ServiceState.Running, null, true, false, false, false)?.Message);
+        Assert.AreEqual(HostMessages.StoppedTitle,
+            HostHelpers.SelectNotice(ServiceState.Stopped, null, false, true, true, true)?.Title);
+        Assert.AreEqual(HostMessages.SignOutTitle,
+            HostHelpers.SelectNotice(ServiceState.Running, null, false, true, true, true)?.Title);
+        Assert.AreEqual(HostMessages.ControlTitle,
+            HostHelpers.SelectNotice(ServiceState.Running, null, false, false, true, true)?.Title);
+        Assert.AreEqual(MessageTone.Informational,
+            HostHelpers.SelectNotice(ServiceState.Running, null, false, false, false, true)?.Severity);
+        // - Like the other notices, the test-mode one is only a title.
+        Assert.AreEqual("", HostHelpers.SelectNotice(ServiceState.Running, null, false, false, false, true)?.Message);
+        Assert.IsNull(HostHelpers.SelectNotice(ServiceState.Running, null, false, false, false, false));
+    }
 
     [TestMethod]
     public async Task UnauthorizedReplyAsksToSignOut()
@@ -47,8 +67,7 @@ public sealed class HostNoticeTests
     [TestMethod]
     public async Task EmptyListSaysNoPairedDevice()
     {
-        var model = Model(() => Encoding.UTF8.GetBytes(
-            "{\"version\":1,\"ok\":true,\"host_id\":\"03c85317-9d93-4fb3-a04b-91a0e16668c6\",\"paired_devices\":[]}"));
+        var model = Model(() => TestHost.Bytes(TestHost.ListJson()));
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.IsFalse(model.IsNoticeOpen);
         Assert.IsTrue(model.ShowNoDevices);
@@ -74,5 +93,30 @@ public sealed class HostNoticeTests
         // - The notice changes from "can't reach the service" to "stopped".
         model.ServiceState = ServiceState.Stopped;
         CollectionAssert.AreEqual(new[] { false, true }, notice);
+    }
+
+    [TestMethod]
+    [DataRow(typeof(IOException))]
+    [DataRow(typeof(System.ComponentModel.Win32Exception))]
+    [DataRow(typeof(HostControlException))]
+    public async Task ADiagnosticsFailureOfTheHostKindMeansUnavailable(Type failure)
+    {
+        var model = TestHost.Model(TestHost.Client(_ => null),
+            _ => throw (Exception)(failure == typeof(HostControlException)
+                ? new HostControlException(false) : Activator.CreateInstance(failure)!));
+        await model.RefreshCommand.ExecuteAsync(null);
+        Assert.AreEqual(ServiceState.Unavailable, model.ServiceState);
+        Assert.IsFalse(model.IsBusy);
+    }
+
+    [TestMethod]
+    public async Task AProgrammingErrorInDiagnosticsIsNotHiddenAsUnavailable()
+    {
+        var model = TestHost.Model(TestHost.Client(_ => null),
+            _ => throw new InvalidOperationException("Fixture bug."));
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => model.RefreshCommand.ExecuteAsync(null));
+        Assert.AreNotEqual(ServiceState.Unavailable, model.ServiceState);
+        Assert.IsFalse(model.IsBusy, "the failed refresh must release the page");
+        Assert.IsFalse(model.IsInteracting);
     }
 }

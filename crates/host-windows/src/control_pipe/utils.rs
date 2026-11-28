@@ -1,7 +1,7 @@
 use super::{
     consts::{CAPACITY_UNAVAILABLE, DEADLINE, INVALID_RESPONSE, UNAUTHORIZED},
     native::duplicate_pipe,
-    types::{Authorize, Capacity, Dispatch, Worker},
+    types::{Allowed, Authorize, Capacity, Dispatch, Worker},
 };
 use crate::shared::consts::FAILURE;
 use myrig_protocol::local_control::framing::{read_frame, write_frame};
@@ -45,7 +45,7 @@ async fn refuse(pipe: &mut NamedPipeServer) -> Result<(), &'static str> {
 pub(super) async fn serve_connection<Context: Send + 'static>(
     mut pipe: NamedPipeServer,
     dispatch: Dispatch<Context>,
-    allowed_sids: Arc<Vec<Vec<u32>>>,
+    allowed: Arc<Allowed>,
     mut stop: watch::Receiver<bool>,
     capacity: Arc<Capacity>,
     reader: tokio::sync::OwnedSemaphorePermit,
@@ -63,8 +63,8 @@ pub(super) async fn serve_connection<Context: Send + 'static>(
             &capacity.normal
         };
         let permit = Arc::clone(slots).try_acquire_owned().ok();
-        // ! A resource failure costs this connection, never the pipe. Only a
-        //   failed impersonation revert (from `authorize`) is fatal.
+        // ! A resource failure costs this connection, never the pipe. Only a failed impersonation
+        // ! revert (from `authorize`) is fatal.
         let Ok(duplicate) = duplicate_pipe(&pipe) else {
             return refuse(&mut pipe).await;
         };
@@ -72,20 +72,20 @@ pub(super) async fn serve_connection<Context: Send + 'static>(
         let thread = thread::Builder::new()
             .name("myrig-local-control".into())
             .spawn(move || {
-                let result = match authorize(&duplicate, &allowed_sids) {
+                let result = match authorize(&duplicate, &allowed) {
                     Ok(true) => {
                         let Some(_permit) = permit else {
-                            let _ = sender.send(Ok(CAPACITY_UNAVAILABLE.to_vec()));
+                            let _ = sender.send(Ok(CAPACITY_UNAVAILABLE.to_vec().into()));
                             return;
                         };
                         let response = (dispatch.callback)(&request, dispatch.context);
                         Ok(if response.is_empty() || response.len() > RESPONSE_LIMIT {
-                            INVALID_RESPONSE.to_vec()
+                            INVALID_RESPONSE.to_vec().into()
                         } else {
                             response
                         })
                     }
-                    Ok(false) => Ok(UNAUTHORIZED.to_vec()),
+                    Ok(false) => Ok(UNAUTHORIZED.to_vec().into()),
                     Err(error) => Err(error),
                 };
                 let _ = sender.send(result);

@@ -9,28 +9,30 @@ using MyRigConfig.Core.Management;
 namespace MyRigConfig.Features.Host;
 
 /// <summary>Service status, paired devices and settings. Every change goes through <see
-/// cref="HostManagement"/>, which checks the host again against the one the user
+/// cref="HostManagementService"/>, which checks the host again against the one the user
 /// confirmed.</summary>
 public partial class HostViewModel : ObservableObject
 {
-    private readonly HostManagement management = new();
-    private readonly HostControlClient client;
+    private readonly HostManagementService management = new();
+    private readonly HostControlClientService client;
     private readonly Func<CancellationToken, Task<HostObservation>> diagnostics;
     private readonly TimeProvider clock;
     private readonly Func<CancellationToken, Task> startService;
     private readonly Func<CancellationToken, Task> restartService;
+    private readonly IPortProbe probe;
     private int interactions;
+    // ! The host whose pairing code may still be valid. Retiring the page closes it.
+    private Guid? openApproval;
 
-    public HostViewModel() : this(new HostControlClient(), HostDiagnostics.ReadAsync, TimeProvider.System) { }
+    public HostViewModel() : this(new HostControlClientService(), HostDiagnosticsService.ReadAsync, TimeProvider.System,
+        HostServiceControlService.StartAsync, HostServiceControlService.RestartAsync, new HostPortProbeService()) { }
 
-    internal HostViewModel(HostControlClient client,
-        Func<CancellationToken, Task<HostObservation>> diagnostics, TimeProvider clock)
-        : this(client, diagnostics, clock, HostServiceControl.StartAsync, HostServiceControl.RestartAsync) { }
-
-    internal HostViewModel(HostControlClient client,
+    internal HostViewModel(HostControlClientService client,
         Func<CancellationToken, Task<HostObservation>> diagnostics, TimeProvider clock,
-        Func<CancellationToken, Task> startService, Func<CancellationToken, Task> restartService)
+        Func<CancellationToken, Task> startService, Func<CancellationToken, Task> restartService,
+        IPortProbe probe)
     {
+        this.probe = probe;
         this.startService = startService;
         this.restartService = restartService;
         this.client = client;
@@ -145,8 +147,8 @@ public partial class HostViewModel : ObservableObject
 
     internal IReadOnlySet<Guid> CurrentDeviceIds => PairedDevices.Select(device => device.DeviceId).ToHashSet();
 
-    // ? Narrator announces an InfoBar when it opens, not when its text changes, so an open bar is
-    //   closed and reopened for each new message.
+    // ? Narrator announces an InfoBar when it opens, not when its text changes, so an open bar is closed and reopened
+    // ? for each new message.
     internal void ShowFeedback(string message, MessageTone severity)
     {
         IsFeedbackOpen = false;
@@ -193,7 +195,9 @@ public partial class HostViewModel : ObservableObject
             else ReportUnavailable(controlFailure: false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        // ! Only failures of the host itself mean "unavailable"; a bug must not look like one.
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+            && exception is HostControlException or IOException or System.ComponentModel.Win32Exception)
         {
             ServiceState = ServiceState.Unavailable;
             ReportUnavailable(controlFailure: false);
@@ -204,6 +208,26 @@ public partial class HostViewModel : ObservableObject
             if (!quiet) IsBusy = false;
             UpdateCanManage();
         }
+    }
+
+    /// <summary>Called when the page is torn down: stops everything and closes a pairing code that
+    /// is still open, because nothing is left to watch it.</summary>
+    internal async Task RetireAsync()
+    {
+        CancelAll();
+        if (openApproval is { } hostId) await ClosePairingAsync(hostId);
+    }
+
+    private void CancelAll()
+    {
+        RefreshCommand.Cancel();
+        StartServiceCommand.Cancel();
+        RestartServiceCommand.Cancel();
+        PairCommand.Cancel();
+        RemoveCommand.Cancel();
+        RenameCommand.Cancel();
+        ChangePortCommand.Cancel();
+        ChangeTestModeCommand.Cancel();
     }
 
     [RelayCommand(CanExecute = nameof(CanStartService))]
@@ -233,8 +257,9 @@ public partial class HostViewModel : ObservableObject
             management.End();
             IsBusy = false;
         }
-        // ? SCM work can finish after cancellation, so publish the final state we see.
-        await RefreshAsync(CancellationToken.None);
+        // ? SCM work can finish after the command was cancelled, so the final state is still published. Only a retired
+        // ? page, which nobody looks at any more, skips it.
+        await RefreshAsync(PageLifetime);
     }
 
     /// <summary>Starts a user interaction and returns the host it was confirmed against.</summary>
@@ -284,34 +309,48 @@ public partial class HostViewModel : ObservableObject
     {
         if (!await RefreshManagementAsync(cancellationToken)) return new(null, PairingFailure.Unreachable, false);
         if (!management.MatchesHost(confirmedHost)) return new(null, PairingFailure.HostChanged, false);
-        if (!LocalControlProtocol.IsValidName(name)) return new(null, PairingFailure.InvalidName, false);
+        if (!LocalControlProtocolService.IsValidName(name)) return new(null, PairingFailure.InvalidName, false);
         // ! The code's lifetime starts counting before the request is sent.
         var started = clock.GetTimestamp();
         var sent = false;
+        // ! The code may exist from the moment the request goes out, so it is recorded then.
+        var previousApproval = openApproval;
         try
         {
-            var reply = await client.OpenPairingAsync(confirmedHost, name, () => sent = true, cancellationToken);
-            return reply switch
+            var reply = await client.OpenPairingAsync(confirmedHost, name,
+                () => { sent = true; openApproval = confirmedHost; }, cancellationToken);
+            PairingOpenResult result = reply switch
             {
-                LocalControlPairingReply pairing => new(new PairingCodeLease(pairing.Code, started, clock), null, true),
+                LocalControlPairingReply pairing => new(new PairingCodeLeaseService(pairing.Code, started, clock), null, true),
                 LocalControlErrorReply => new(null, PairingFailure.CodeFailed, false),
                 _ => new(null, PairingFailure.CodeFailed, sent),
             };
+            if (!result.ApprovalMayExist) openApproval = previousApproval;
+            return result;
         }
         catch (HostControlException exception)
         {
             ReportUnavailable(controlFailure: true);
-            return exception.OutcomeUncertain
-                ? new(null, PairingFailure.CodeFailed, true)
-                : new(null, PairingFailure.Unreachable, false);
+            if (!exception.OutcomeUncertain)
+            {
+                openApproval = previousApproval;
+                return new(null, PairingFailure.Unreachable, false);
+            }
+            return new(null, PairingFailure.CodeFailed, true);
         }
     }
+
+    /// <summary>A device paired with the open code, so the host no longer holds it.</summary>
+    internal void ApprovalConsumed() => openApproval = null;
 
     internal async Task<bool> ClosePairingAsync(Guid hostId)
     {
         try
         {
-            return await client.ClosePairingAsync(hostId, CancellationToken.None) is LocalControlClosePairingReply;
+            var closed = await client.ClosePairingAsync(hostId, CancellationToken.None) is LocalControlClosePairingReply;
+            // ! A failed close stays recorded, so retiring the page tries once more.
+            if (closed && openApproval == hostId) openApproval = null;
+            return closed;
         }
         catch (HostControlException) { return false; }
     }
@@ -321,59 +360,43 @@ public partial class HostViewModel : ObservableObject
         await RefreshManagementAsync(cancellationToken)
         && PairedDevices.Any(device => !before.Contains(device.DeviceId) && string.Equals(device.Name, name, StringComparison.Ordinal));
 
-    internal async Task RemoveDeviceAsync(Guid deviceId, Func<string, Task<bool>> confirm, CancellationToken cancellationToken)
+    /// <summary>Runs <paramref name="action"/> against the host the user confirmed and releases the
+    /// interaction afterwards. Returns false when no host could be confirmed; then
+    /// <paramref name="unreachable"/>, if given, is shown.</summary>
+    private async Task<bool> InteractAsync(Func<Guid, Task> action, string? unreachable, CancellationToken cancellationToken)
     {
         var confirmedHost = await BeginInteractionAsync(cancellationToken);
-        if (confirmedHost is null) return;
-        try
+        if (confirmedHost is null)
         {
-            var name = DeviceName(deviceId);
-            if (name is null || !await confirm(name)
-                || !await StillListedAsync(confirmedHost.Value, deviceId, name, cancellationToken)) return;
-            var (message, severity) = (HostMessages.RemovalUncertain, MessageTone.Warning);
-            try
-            {
-                if (await client.RemoveAsync(confirmedHost.Value, deviceId, cancellationToken) is LocalControlRemoveReply reply)
-                    (message, severity) = reply.Removed
-                        ? (HostMessages.Removed(name), MessageTone.Success)
-                        : (HostMessages.NoLongerPaired, MessageTone.Informational);
-            }
-            catch (HostControlException) { }
-            // ! Don't update the list from a guess; show what the service reports.
-            await RefreshManagementAsync(cancellationToken);
-            ShowFeedback(message, severity);
+            if (unreachable is not null) ShowFeedback(unreachable, MessageTone.Error);
+            return false;
         }
+        try { await action(confirmedHost.Value); }
         finally { EndInteraction(); }
+        return true;
     }
 
+    internal Task RemoveDeviceAsync(Guid deviceId, Func<string, Task<bool>> confirm, CancellationToken cancellationToken) =>
+        InteractAsync(async confirmedHost =>
+        {
+            var name = DeviceName(deviceId);
+            if (name is null || !await confirm(name)) return;
+            await ChangeDeviceAsync(confirmedHost, deviceId, name, ct => RemovedAsync(confirmedHost, deviceId, ct),
+                HostMessages.Removed(name), HostMessages.RemovalUncertain, cancellationToken);
+        }, unreachable: null, cancellationToken);
+
     /// <param name="askName">Returns the new name, or null when the user cancels.</param>
-    internal async Task RenameDeviceAsync(Guid deviceId, Func<string, Task<string?>> askName, CancellationToken cancellationToken)
-    {
-        var confirmedHost = await BeginInteractionAsync(cancellationToken);
-        if (confirmedHost is null) return;
-        try
+    internal Task RenameDeviceAsync(Guid deviceId, Func<string, Task<string?>> askName, CancellationToken cancellationToken) =>
+        InteractAsync(async confirmedHost =>
         {
             var name = DeviceName(deviceId);
             if (name is null) return;
             var newName = await askName(name);
             if (newName is null || string.Equals(newName, name, StringComparison.Ordinal)
-                || !LocalControlProtocol.IsValidName(newName)
-                || !await StillListedAsync(confirmedHost.Value, deviceId, name, cancellationToken)) return;
-            var (message, severity) = (HostMessages.RenameUncertain, MessageTone.Warning);
-            try
-            {
-                if (await client.RenameAsync(confirmedHost.Value, deviceId, newName, cancellationToken)
-                    is LocalControlRenameReply reply)
-                    (message, severity) = reply.Renamed
-                        ? (HostMessages.Renamed(newName), MessageTone.Success)
-                        : (HostMessages.NoLongerPaired, MessageTone.Informational);
-            }
-            catch (HostControlException) { }
-            await RefreshManagementAsync(cancellationToken);
-            ShowFeedback(message, severity);
-        }
-        finally { EndInteraction(); }
-    }
+                || !LocalControlProtocolService.IsValidName(newName)) return;
+            await ChangeDeviceAsync(confirmedHost, deviceId, name, ct => RenamedAsync(confirmedHost, deviceId, newName, ct),
+                HostMessages.Renamed(newName), HostMessages.RenameUncertain, cancellationToken);
+        }, unreachable: null, cancellationToken);
 
     private string? DeviceName(Guid deviceId) => PairedDevices.FirstOrDefault(device => device.DeviceId == deviceId)?.Name;
 
@@ -396,32 +419,48 @@ public partial class HostViewModel : ObservableObject
     /// control that opened the dialog, and it loses keyboard focus.</summary>
     internal bool IsDialogOpen { get; private set; }
 
-    private async Task WithDialogAsync(Func<IHostDialogs, Task> action)
+    /// <summary>Cancelled when the page is torn down. Work that outlives a cancelled command still
+    /// stops with the page.</summary>
+    internal CancellationToken PageLifetime { get; set; }
+
+    /// <summary>Where unexpected exceptions go. Tests replace it.</summary>
+    internal Action<Exception> LogError { get; set; } = ErrorLogService.Write;
+
+    // ! These commands run from async void event handlers, so an exception that escapes here would end the app. It is
+    // ! logged and shown as the command's own failure message instead.
+    private async Task WithDialogAsync(Func<IHostDialogs, Task> action, string failure)
     {
         if (IsDialogOpen || Dialogs is not { } dialogs) return;
         IsDialogOpen = true;
         try { await action(dialogs); }
         catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            LogError(exception);
+            ShowFeedback(failure, MessageTone.Error);
+        }
         finally { IsDialogOpen = false; }
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task PairAsync(CancellationToken cancellationToken) =>
-        WithDialogAsync(dialogs => dialogs.ShowPairingAsync(cancellationToken));
+        WithDialogAsync(dialogs => dialogs.ShowPairingAsync(cancellationToken), HostMessages.PairFailed);
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task RemoveAsync(Guid deviceId, CancellationToken cancellationToken) =>
-        WithDialogAsync(dialogs => RemoveDeviceAsync(deviceId, dialogs.ConfirmRemovalAsync, cancellationToken));
+        WithDialogAsync(dialogs => RemoveDeviceAsync(deviceId, dialogs.ConfirmRemovalAsync, cancellationToken),
+            HostMessages.RemovalUncertain);
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private Task RenameAsync(Guid deviceId, CancellationToken cancellationToken) =>
-        WithDialogAsync(dialogs => RenameDeviceAsync(deviceId, dialogs.AskNameAsync, cancellationToken));
+        WithDialogAsync(dialogs => RenameDeviceAsync(deviceId, dialogs.AskNameAsync, cancellationToken),
+            HostMessages.RenameUncertain);
 
     private void ApplyStatus(HostStatus? status)
     {
         CurrentPort = status?.Port;
         TestModeOn = status is { TestMode: true };
-        ListenerUnavailable = status is { ListenerState: "unavailable" };
+        ListenerUnavailable = status is { ListenerState: LocalControlConstants.ListenerUnavailableState };
     }
 
     private async Task<bool> RefreshManagementAsync(CancellationToken cancellationToken)
@@ -437,8 +476,7 @@ public partial class HostViewModel : ObservableObject
                 return false;
             }
             management.Publish(list);
-            // ? Only rebuild when the set changed, so focus and scroll position survive periodic
-            //   refreshes.
+            // ? Only rebuild when the set changed, so focus and scroll position survive periodic refreshes.
             if (!PairedDevices.Select(device => (device.DeviceId, device.Name))
                     .SequenceEqual(management.Devices.Select(device => (device.DeviceId, device.Name))))
             {

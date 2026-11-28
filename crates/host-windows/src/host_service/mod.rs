@@ -2,6 +2,10 @@
 //! status reporting.
 mod service;
 mod types;
+mod utils;
 
 pub use crate::shared::consts::SERVICE_NAME;
 pub use service::run;
+
+#[cfg(test)]
+mod tests;

@@ -1,10 +1,10 @@
 use super::{
     messages::NO_LOCAL_APP_DATA,
-    native::{hostname, local_app_data},
+    native::{Echo, hostname, local_app_data},
     types::Windows,
 };
 use crate::{neighbors::neighbor_macs, network::broadcast_interfaces, settings::WindowsSettings};
-use myrig_client::platform::{Platform, SETTINGS_FOLDER, Settings};
+use myrig_client::platform::{InputEcho, Platform, SETTINGS_FOLDER, Settings};
 use std::{
     io,
     net::Ipv4Addr,
@@ -12,6 +12,9 @@ use std::{
 };
 
 impl Platform for Windows {
+    fn hide_input(&self) -> Option<Box<dyn InputEcho>> {
+        Echo::hide().map(|echo| Box::new(echo) as Box<dyn InputEcho>)
+    }
     fn settings_directory(&self) -> Result<PathBuf, &'static str> {
         local_app_data()
             .map(|base| base.join(SETTINGS_FOLDER))

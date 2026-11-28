@@ -1,6 +1,6 @@
 import { DialogControlsSection } from "@decky/ui";
 import type { SettingsEditorProps } from "./settings.types";
-import { submit, useSettingsEditor } from "./settings-editor.service";
+import { useSettingsEditor } from "./settings-editor.service";
 import {
   EditorFields,
   FormActions,
@@ -13,25 +13,47 @@ import { SettingsLayout } from "./settings-layout.view";
 
 // noinspection HtmlUnknownAttribute
 export function SettingsEditor({ editingId }: SettingsEditorProps) {
-  const editor = useSettingsEditor(editingId);
+  const { editor, actions } = useSettingsEditor(editingId);
   const disabled = editor.operation !== null || editor.load !== "ready";
-  const part = { editor, disabled };
   return (
     <SettingsLayout
       title={editingId ? TITLE_EDIT : TITLE_PAIR}
-      action={editor.step === "details" && <HeaderActions {...part} />}
+      action={
+        editor.step === "details" && (
+          <HeaderActions
+            editingId={editingId}
+            name={editor.form.name}
+            disabled={disabled}
+            actions={actions}
+          />
+        )
+      }
     >
       {editor.error && <AlertView message={editor.error} />}
       <form
         aria-label={formLabel(editor.step, editingId)}
         onSubmit={(event) => {
           event.preventDefault();
-          submit(editor);
+          actions.submit();
         }}
       >
         <DialogControlsSection>
-          <EditorFields {...part} />
-          <FormActions {...part} />
+          <EditorFields
+            form={editor.form}
+            step={editor.step}
+            editingId={editingId}
+            paired={editor.paired}
+            macError={editor.macError}
+            disabled={disabled}
+            actions={actions}
+          />
+          <FormActions
+            step={editor.step}
+            editingId={editingId}
+            operation={editor.operation}
+            disabled={disabled}
+            actions={actions}
+          />
         </DialogControlsSection>
       </form>
     </SettingsLayout>

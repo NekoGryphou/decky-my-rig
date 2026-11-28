@@ -1,15 +1,14 @@
 use super::super::{
     types::Reply,
-    utils::{accepts_json, error, invalid, json_media, read_body, reply, single},
+    utils::{accepts_json, checked_value, error, invalid, json_media, read_body, reply, single},
 };
 use crate::host::{Host, PairRequestError};
 use hyper::{Method, StatusCode, body::Incoming, http::request::Parts};
-use myrig_protocol::checked_json::CheckedJson;
 use serde_json::{Value, json};
 use std::time::Instant;
 
 pub(super) fn parse_device_name(bytes: &[u8]) -> Option<String> {
-    let CheckedJson(value) = serde_json::from_slice(bytes).ok()?;
+    let value = checked_value(bytes)?;
     let object = value.as_object()?;
     if object.len() != 1 {
         return None;

@@ -20,20 +20,19 @@ impl Host {
                 .pairing
                 .lock()
                 .map_err(|_| PairRequestError::Unavailable)?;
-            // ! Failed guesses slow down the next request, so cycling through
-            //   codes can't brute-force a PC nobody's watching.
+            // ! Failed guesses slow down the next request, so cycling through codes can't brute-
+            // ! force a PC nobody's watching.
             let interval = request_interval(state.failed_starts);
             if last.is_some_and(|at| now.saturating_duration_since(at) < interval) {
                 return Err(PairRequestError::Busy);
             }
-            // ! A code nobody has tried yet can be replaced (its notification was
-            //   dismissed). Once someone has tried it, it stays until it expires,
-            //   so asking again never buys more guesses.
+            // ! A code nobody has tried yet can be replaced (its notification was dismissed). A
+            // ! code someone is still guessing at stays until it expires, so asking again never
+            // ! buys more guesses. A code whose guesses are all spent can be replaced.
             let tried = session_pending(&mut state, now)
-                && state
-                    .session
-                    .as_ref()
-                    .is_some_and(|session| !session.crypto.untouched());
+                && state.session.as_ref().is_some_and(|session| {
+                    !session.crypto.untouched() && !session.crypto.exhausted()
+                });
             if state.busy || tried {
                 return Err(PairRequestError::Busy);
             }

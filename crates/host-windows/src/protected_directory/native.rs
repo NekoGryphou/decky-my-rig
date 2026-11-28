@@ -11,7 +11,8 @@ fn os_error(error: windows::core::Error) -> io::Error {
 pub(super) fn create_directory(path: &Path, sddl: &str) -> io::Result<()> {
     let name = wide(&path.to_string_lossy());
     with_security(sddl, |attributes| {
-        // ! SAFETY: `name` is NUL-terminated and `attributes` points to a live descriptor for the call.
+        // ! SAFETY: `name` is NUL-terminated and `attributes` points to a live descriptor for the
+        // ! call.
         unsafe { CreateDirectoryW(PCWSTR(name.as_ptr()), Some(attributes.cast_const())) }
             .map_err(os_error)
     })

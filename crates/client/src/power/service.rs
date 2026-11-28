@@ -6,7 +6,7 @@ use super::{
         START_FAILED, STOP_FAILED,
     },
     types::{Controller, Entry, State},
-    utils::{begin_transition, deadline_passed, new_entry, settings_of, settle},
+    utils::{begin_transition, deadline_passed, new_entry, revision_base, settle},
 };
 use crate::{
     host_client::HostError,
@@ -30,7 +30,10 @@ impl<E: Environment> Controller<E> {
         Self {
             store,
             environment,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                revision: revision_base(),
+                ..State::default()
+            }),
             snapshots: Snapshots::new(),
         }
     }
@@ -45,18 +48,18 @@ impl<E: Environment> Controller<E> {
     pub fn publish(&self, refreshed: bool) -> SnapshotFrame {
         let frame = {
             let mut state = self.reconciled();
-            let pcs: Vec<PcSnapshot> = self
-                .store
-                .configs()
-                .iter()
-                .filter_map(|pc| state.entries.get(&pc.id))
-                .map(|entry| PcSnapshot {
-                    id: entry.config.id.to_string(),
-                    name: entry.config.name.clone(),
-                    state: entry.state,
-                    issue: entry.issue,
-                })
-                .collect();
+            let pcs: Vec<PcSnapshot> = self.store.with_configs(|configs| {
+                configs
+                    .iter()
+                    .filter_map(|pc| state.entries.get(&pc.id))
+                    .map(|entry| PcSnapshot {
+                        id: entry.config.id.to_string(),
+                        name: entry.config.name.clone(),
+                        state: entry.state,
+                        issue: entry.issue,
+                    })
+                    .collect()
+            });
             let test_stops = TestStops {
                 count: state.test_stops,
                 name: state.test_stop_name.clone(),
@@ -88,29 +91,32 @@ impl<E: Environment> Controller<E> {
     }
 
     pub fn settings(&self) -> Vec<PcSettings> {
-        self.store.configs().iter().map(settings_of).collect()
+        self.store.configs().iter().map(PcSettings::from).collect()
     }
 
     pub fn detect_mac(&self, host: &str) -> Result<String, PublicError> {
         self.environment.detect_mac(normalize_host(host)?)
     }
 
-    pub fn update_pc(&self, id: &str, changes: PcChanges) -> Result<PcSettings, PublicError> {
+    pub async fn update_pc(&self, id: &str, changes: PcChanges) -> Result<PcSettings, PublicError> {
         let id = identifier(id)?;
         if changes.authentication.is_some() {
             return Err(PublicError(CREDENTIALS_FROM_PAIRING));
         }
-        let updated = self.store.update(id, changes)?;
+        let updated = self
+            .store
+            .blocking(move |store| store.update(id, changes))
+            .await?;
         drop(self.reconciled());
-        Ok(settings_of(&updated))
+        Ok(PcSettings::from(&updated))
     }
 
     /// Deletes the PC here first, then asks it to forget this device. Deleting
     /// locally first means a failed save changes nothing on either side.
     pub async fn delete_pc(&self, id: &str) -> Result<DeleteResult, PublicError> {
         let id = identifier(id)?;
-        let config = self.store.configs().into_iter().find(|pc| pc.id == id);
-        self.store.delete(id)?;
+        let config = self.store.get(id);
+        self.store.blocking(move |store| store.delete(id)).await?;
         drop(self.reconciled());
         let unpaired = match config {
             Some(config) => self.environment.unpair(&config).await.is_ok(),
@@ -156,7 +162,7 @@ impl<E: Environment> Controller<E> {
         let result = match self.environment.shutdown(&config, Uuid::new_v4()).await {
             Ok(result) => result,
             Err(error) => {
-                if let Some(issue) = issue_of(error) {
+                if let Some(issue) = error.issue() {
                     self.record_issue(id, &config, issue, true);
                 }
                 return Err(PublicError(STOP_FAILED));
@@ -193,7 +199,7 @@ impl<E: Environment> Controller<E> {
     }
 
     /// Checks one PC and returns true if it answered online.
-    pub async fn poll(&self, id: Uuid) -> bool {
+    pub(super) async fn poll(&self, id: Uuid) -> bool {
         let Some(config) = self
             .reconciled()
             .entries
@@ -209,7 +215,8 @@ impl<E: Environment> Controller<E> {
                 return false;
             }
             Err(error) => {
-                match issue_of(error)
+                match error
+                    .issue()
                     .or((error == HostError::Invalid).then_some(PcIssue::Compatibility))
                 {
                     Some(issue) => self.record_issue(id, &config, issue, false),
@@ -291,19 +298,31 @@ impl<E: Environment> Controller<E> {
     /// The state with one entry per saved PC. A new or changed record gets a
     /// fresh "checking" entry.
     fn reconciled(&self) -> MutexGuard<'_, State> {
-        let configs = self.store.configs();
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut entries = std::mem::take(&mut state.entries);
-        state.entries = configs
-            .into_iter()
-            .map(|config| {
-                let entry = match entries.remove(&config.id) {
-                    Some(entry) if entry.config == config => entry,
-                    _ => new_entry(config),
-                };
-                (entry.config.id, entry)
-            })
-            .collect::<HashMap<_, _>>();
+        // ? The state lock is taken before the store's, as in `publish`.
+        self.store.with_configs(|configs| {
+            let unchanged = state.entries.len() == configs.len()
+                && configs.iter().all(|config| {
+                    state
+                        .entries
+                        .get(&config.id)
+                        .is_some_and(|entry| entry.config == *config)
+                });
+            if unchanged {
+                return;
+            }
+            let mut entries = std::mem::take(&mut state.entries);
+            state.entries = configs
+                .iter()
+                .map(|config| {
+                    let entry = match entries.remove(&config.id) {
+                        Some(entry) if entry.config == *config => entry,
+                        _ => new_entry(config.clone()),
+                    };
+                    (config.id, entry)
+                })
+                .collect::<HashMap<_, _>>();
+        });
         state
     }
 }
@@ -319,14 +338,4 @@ impl State {
 
 fn identifier(id: &str) -> Result<Uuid, PublicError> {
     normalize_uuid(id).map_err(|_| PublicError(INVALID_IDENTIFIER))
-}
-
-/// Host answers the user has to deal with, rather than something to retry.
-fn issue_of(error: HostError) -> Option<PcIssue> {
-    match error {
-        HostError::PinMismatch => Some(PcIssue::Identity),
-        HostError::Unauthorized => Some(PcIssue::Authentication),
-        HostError::UnsupportedProtocol => Some(PcIssue::Compatibility),
-        _ => None,
-    }
 }

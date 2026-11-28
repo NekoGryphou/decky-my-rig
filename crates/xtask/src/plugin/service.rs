@@ -1,5 +1,6 @@
 use super::{
-    consts::{AGENTS, ARCHIVE_ROOT, Build},
+    consts::{AGENTS, ARCHIVE_ROOT, Agent, Build},
+    stamp::{check_stamp, input_hash, stamp_path, write_stamp},
     utils::{
         crate_dependencies, deterministic_zip, hex_sha256, is_pe, is_static_elf,
         reject_credentials, release_files, valid_version, write_bin,
@@ -81,6 +82,18 @@ pub fn agents(out: &Path) -> Result<(), String> {
     write_bin(out, &agent_payload(&root, &[], false)?)
 }
 
+/// Writes the stamp of an agent built by a script outside xtask, such as
+/// `tools/build_linux.sh`. The plugin build refuses an agent without one.
+pub fn stamp(binary: &Path) -> Result<(), String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    fs::metadata(binary).map_err(|error| format!("{}: {error}", binary.display()))?;
+    let hash = input_hash(&root, &own_crate_dirs(&root)?)?;
+    write_stamp(binary, &hash)?;
+    println!("{}", stamp_path(binary).display());
+    Ok(())
+}
+
 /// The static agents and the notices of every crate compiled into them.
 fn agent_payload(
     root: &Path,
@@ -88,23 +101,36 @@ fn agent_payload(
     prebuilt_linux: bool,
 ) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let manifest = root.join("crates/client-cli/Cargo.toml");
-    // - The shared build folder. The musl targets get their own subfolders.
-    let target = root.join("out/cargo");
-    let cargo = || {
-        let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        command.env("CARGO_TARGET_DIR", &target);
-        command
-    };
-    let mut payload = BTreeMap::new();
+    let selected: Vec<&Agent> = AGENTS
+        .iter()
+        .filter(|agent| match agent.build {
+            Build::Linux(_) => true,
+            Build::Windows(_) => windows.iter().any(|arch| arch == agent.arch),
+        })
+        .collect();
+    // - One notices file covers every agent: all their crates together, from one
+    //   metadata run for all the selected targets.
+    let metadata = cargo_metadata(root, &selected)?;
     let mut packages = BTreeMap::new();
-    for agent in AGENTS.iter().filter(|agent| match agent.build {
-        Build::Linux(_) => true,
-        Build::Windows(_) => windows.iter().any(|arch| arch == agent.arch),
-    }) {
-        let (name, binary) = match agent.build {
+    for package in crate_dependencies(&metadata, &manifest)? {
+        if package["source"].is_null() {
+            continue;
+        }
+        let key = (
+            text(&package["name"]).to_owned(),
+            text(&package["version"]).to_owned(),
+        );
+        packages.entry(key).or_insert_with(|| package.clone());
+    }
+    let inputs = input_hash(root, &own_crate_dirs(root)?)?;
+    let target = root.join("out/cargo");
+    let mut payload = BTreeMap::new();
+    for agent in &selected {
+        let (name, binary, path) = match agent.build {
             Build::Linux(machine) => {
+                let path = target.join(agent.target).join("release/myrig");
                 if !prebuilt_linux {
-                    run(cargo()
+                    run(cargo_command(root)
                         .args([
                             "build",
                             "--locked",
@@ -115,15 +141,16 @@ fn agent_payload(
                         ])
                         .args(["--target", agent.target, "--manifest-path"])
                         .arg(&manifest))?;
+                    write_stamp(&path, &inputs)?;
                 }
-                let binary = read(&target.join(agent.target).join("release/myrig"))?;
+                let binary = read(&path)?;
                 if !is_static_elf(&binary, machine) {
                     return Err(format!(
                         "myrig for {} is not a static executable",
                         agent.target
                     ));
                 }
-                (format!("bin/myrig-{}-linux", agent.arch), binary)
+                (format!("bin/myrig-{}-linux", agent.arch), binary, path)
             }
             Build::Windows(machine) => {
                 let path = target.join(agent.target).join("release/myrig.exe");
@@ -137,34 +164,15 @@ fn agent_payload(
                         agent.target
                     ));
                 }
-                (format!("bin/myrig-{}-windows.exe", agent.arch), binary)
+                (
+                    format!("bin/myrig-{}-windows.exe", agent.arch),
+                    binary,
+                    path,
+                )
             }
         };
+        check_stamp(&path, &inputs)?;
         payload.insert(name, binary);
-        let output = cargo()
-            .args(["metadata", "--locked", "--offline", "--format-version", "1"])
-            .args(["--filter-platform", agent.target, "--manifest-path"])
-            .arg(&manifest)
-            .output()
-            .map_err(|error| format!("cargo metadata: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "cargo metadata: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        let metadata: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|error| format!("cargo metadata: {error}"))?;
-        // - One notices file covers every agent: all their crates together.
-        for package in crate_dependencies(&metadata, &manifest)? {
-            if !package["source"].is_null() {
-                let key = (
-                    text(&package["name"]).to_owned(),
-                    text(&package["version"]).to_owned(),
-                );
-                packages.entry(key).or_insert_with(|| package.clone());
-            }
-        }
     }
     let mut notices = String::from(
         "Decky My Rig agent (myrig) dependency notices\n\
@@ -178,6 +186,74 @@ fn agent_payload(
         notices.into_bytes(),
     );
     Ok(payload)
+}
+
+/// The cargo command that builds into the shared `out/cargo` folder. The musl
+/// targets get their own subfolders there.
+fn cargo_command(root: &Path) -> Command {
+    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    command.env("CARGO_TARGET_DIR", root.join("out/cargo"));
+    command
+}
+
+/// `cargo metadata` for the client CLI, limited to the platforms of `agents`, or
+/// every platform when `agents` is empty.
+fn cargo_metadata(root: &Path, agents: &[&Agent]) -> Result<Value, String> {
+    let mut command = cargo_command(root);
+    command.args(["metadata", "--locked", "--offline", "--format-version", "1"]);
+    for agent in agents {
+        command.args(["--filter-platform", agent.target]);
+    }
+    let output = command
+        .arg("--manifest-path")
+        .arg(root.join("crates/client-cli/Cargo.toml"))
+        .output()
+        .map_err(|error| format!("cargo metadata: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("cargo metadata: {error}"))
+}
+
+/// The folders of every workspace crate. Stamping needs only these, so it asks
+/// for no dependency: resolving every platform's dependencies needs packages a
+/// Windows-only checkout never downloads, and `--offline` then fails.
+fn own_crate_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let output = cargo_command(root)
+        .args([
+            "metadata",
+            "--locked",
+            "--offline",
+            "--no-deps",
+            "--format-version",
+            "1",
+        ])
+        .arg("--manifest-path")
+        .arg(root.join("Cargo.toml"))
+        .output()
+        .map_err(|error| format!("cargo metadata: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let metadata = serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("cargo metadata: {error}"))?;
+    Ok(metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|package| {
+            Path::new(text(&package["manifest_path"]))
+                .parent()
+                .map(Path::to_path_buf)
+        })
+        .collect())
 }
 
 fn package_notice(package: &Value) -> Result<String, String> {
@@ -214,8 +290,7 @@ fn package_notice(package: &Value) -> Result<String, String> {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        // ? Crates pick their own encoding, and a stray byte shouldn't block a
-        //   release.
+        // ? Crates pick their own encoding, and a stray byte shouldn't block a release.
         let body = String::from_utf8_lossy(&read(&path)?).replace("\r\n", "\n");
         notice.push_str(&format!("\n--- {file} ---\n{body}\n"));
     }

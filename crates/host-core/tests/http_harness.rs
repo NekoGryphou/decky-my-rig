@@ -22,7 +22,14 @@ struct Recorder {
 impl Power for Recorder {
     fn schedule_shutdown(&self) -> Result<(), PowerError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        if self.refuse { Err(PowerError) } else { Ok(()) }
+        if self.refuse {
+            Err(PowerError { code: 5 })
+        } else {
+            Ok(())
+        }
+    }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        Ok(())
     }
 }
 
@@ -72,7 +79,7 @@ async fn serve_harness() {
             "12345678",
             [9; 32],
             &std::fs::read(certificate).unwrap(),
-            [3; 32],
+            &[3; 32],
             uuid::Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap(),
             file_persist(config_path.clone()),
         )

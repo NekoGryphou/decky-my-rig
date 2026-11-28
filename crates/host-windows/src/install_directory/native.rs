@@ -7,7 +7,7 @@ use super::{
     utils::drive_is_registered,
 };
 use crate::shared::native::{LocalAllocation, sid_text, wide};
-use std::{fs, io, os::windows::fs::MetadataExt, path::Path};
+use std::{ffi::c_void, fs, io, mem::size_of, os::windows::fs::MetadataExt, path::Path};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows::Win32::Storage::FileSystem::{
     GetDriveTypeW, GetVolumeNameForVolumeMountPointW, GetVolumePathNamesForVolumeNameW,
@@ -15,13 +15,10 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::{
     Win32::Security::{
-        ACL,
-        Authorization::{
-            DENY_ACCESS, GRANT_ACCESS, GetExplicitEntriesFromAclW, GetNamedSecurityInfoW,
-            SE_FILE_OBJECT, TRUSTEE_IS_SID,
-        },
-        DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
-        INHERIT_ONLY_ACE, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+        Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+        DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, GetSecurityDescriptorDacl,
+        GetSecurityDescriptorOwner, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
     },
     core::{BOOL, PCWSTR},
 };
@@ -68,8 +65,8 @@ pub(super) fn check_drive(root: &Path) -> Result<(), &'static str> {
     }
     .map_err(|_| FAILURE)?;
     let mounts = mounts.get(..returned as usize).ok_or(FAILURE)?;
-    // ? Mount-manager paths leave out drive letters that only exist in the
-    //   installer's login session.
+    // ? Mount-manager paths leave out drive letters that only exist in the installer's login
+    // ? session.
     if drive_is_registered(text, mounts) {
         Ok(())
     } else {
@@ -84,7 +81,8 @@ pub(super) fn decode(descriptor: PSECURITY_DESCRIPTOR) -> Result<Security, &'sta
     let mut defaulted = BOOL::default();
     let mut present = BOOL::default();
     let mut dacl: *mut ACL = std::ptr::null_mut();
-    // ! SAFETY: `descriptor` is a valid security descriptor (see `decode`); all out-pointers are live.
+    // ! SAFETY: `descriptor` is a valid security descriptor (see `decode`); all out-pointers are
+    // ! live.
     unsafe {
         GetSecurityDescriptorOwner(descriptor, &mut owner, &mut defaulted).map_err(|_| FAILURE)?;
         GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted)
@@ -94,36 +92,73 @@ pub(super) fn decode(descriptor: PSECURITY_DESCRIPTOR) -> Result<Security, &'sta
         return Err(FAILURE);
     }
     let owner = sid_text(owner)?;
-    let mut count = 0;
-    let mut entries = std::ptr::null_mut();
-    // ! SAFETY: `dacl` is the descriptor's present, non-null DACL; `entries` is freed by `_allocation`.
-    unsafe { GetExplicitEntriesFromAclW(dacl, &mut count, &mut entries) }
-        .ok()
-        .map_err(|_| FAILURE)?;
-    let _allocation = LocalAllocation(entries.cast());
-    let mut rules = Vec::new();
-    if count != 0 {
-        if entries.is_null() {
-            return Err(FAILURE);
-        }
-        // ! SAFETY: GetExplicitEntriesFromAclW returned `count` entries at the non-null `entries`.
-        for entry in unsafe { std::slice::from_raw_parts(entries, count as usize) } {
-            if entry.Trustee.TrusteeForm != TRUSTEE_IS_SID
-                || !matches!(entry.grfAccessMode, GRANT_ACCESS | DENY_ACCESS)
-            {
-                return Err(FAILURE);
-            }
-            rules.push(AccessRule {
-                principal: sid_text(PSID(entry.Trustee.ptstrName.0.cast()))?,
-                rights: entry.grfAccessPermissions,
-                inherit_only: entry.grfInheritance.contains(INHERIT_ONLY_ACE),
-                inheritable: entry.grfInheritance.0 & 3 != 0,
-                allow: entry.grfAccessMode == GRANT_ACCESS,
-            });
-        }
-    }
+    let rules = access_rules(dacl)?;
     Ok(Security { owner, rules })
 }
+
+// Every entry in the DACL, inherited ones included. GetExplicitEntriesFromAclW
+// leaves inherited entries out, but a parent's grants reach a child through them,
+// so skipping them would let a user-writable folder pass as safe.
+fn access_rules(dacl: *mut ACL) -> Result<Vec<AccessRule>, &'static str> {
+    let mut info = ACL_SIZE_INFORMATION::default();
+    // ! SAFETY: `dacl` is a non-null DACL from a valid descriptor, and `info` is the size-
+    // ! information structure AclSizeInformation fills.
+    unsafe {
+        GetAclInformation(
+            dacl,
+            (&mut info as *mut ACL_SIZE_INFORMATION).cast(),
+            size_of::<ACL_SIZE_INFORMATION>() as u32,
+            AclSizeInformation,
+        )
+    }
+    .map_err(|_| FAILURE)?;
+    let mut rules = Vec::new();
+    for index in 0..info.AceCount {
+        let mut ace: *mut c_void = std::ptr::null_mut();
+        // ! SAFETY: `index` is below AceCount, so GetAce returns the entry at that index, which
+        // ! lives as long as the DACL.
+        unsafe { GetAce(dacl, index, &mut ace) }.map_err(|_| FAILURE)?;
+        if ace.is_null() {
+            return Err(FAILURE);
+        }
+        // ! SAFETY: the header is the first field of every ACE type, so it can be read before the
+        // ! type is known.
+        let header = unsafe { &*(ace as *const ACE_HEADER) };
+        let allow = match header.AceType {
+            ACCESS_ALLOWED_ACE_TYPE => true,
+            ACCESS_DENIED_ACE_TYPE => false,
+            // Audit entries grant nothing.
+            ACCESS_ALLOWED_AUDIT_TYPE | ACCESS_DENIED_AUDIT_TYPE => continue,
+            // An object-specific or unknown entry can't be judged here.
+            _ => return Err(FAILURE),
+        };
+        // ! SAFETY: the allowed and denied ACE types share this layout, and their SID starts at
+        // ! SidStart, which the ACE size bounds.
+        let (mask, sid) = unsafe {
+            let entry = &*(ace as *const ACCESS_ALLOWED_ACE);
+            (
+                entry.Mask,
+                PSID(std::ptr::addr_of!(entry.SidStart).cast_mut().cast()),
+            )
+        };
+        rules.push(AccessRule {
+            principal: sid_text(sid)?,
+            rights: mask,
+            inherit_only: header.AceFlags & INHERIT_ONLY_FLAG != 0,
+            inheritable: header.AceFlags & (OBJECT_INHERIT_FLAG | CONTAINER_INHERIT_FLAG) != 0,
+            allow,
+        });
+    }
+    Ok(rules)
+}
+
+const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+const ACCESS_ALLOWED_AUDIT_TYPE: u8 = 2;
+const ACCESS_DENIED_AUDIT_TYPE: u8 = 3;
+const OBJECT_INHERIT_FLAG: u8 = 0x01;
+const CONTAINER_INHERIT_FLAG: u8 = 0x02;
+const INHERIT_ONLY_FLAG: u8 = 0x08;
 
 pub(super) fn metadata(path: &Path) -> io::Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;

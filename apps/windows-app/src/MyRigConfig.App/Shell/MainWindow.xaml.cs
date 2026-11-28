@@ -10,6 +10,11 @@ namespace MyRigConfig.Shell;
 
 public sealed partial class MainWindow : Window
 {
+    private bool closing;
+
+    /// <summary>True once the window is hidden and waiting for a service action to finish.</summary>
+    internal bool IsClosing => closing;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -23,7 +28,7 @@ public sealed partial class MainWindow : Window
         root.ActualThemeChanged += (_, _) => UpdateCaptionTheme();
         UpdateCaptionTheme();
 
-        AppWindow.SetIcon("Assets/AppIcon.ico");
+        AppWindow.SetIcon(ShellHelpers.IconPath(AppContext.BaseDirectory));
         var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
         AppWindow.Resize(new SizeInt32((int)(DefaultWidth * scale), (int)(DefaultHeight * scale)));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
@@ -36,13 +41,15 @@ public sealed partial class MainWindow : Window
         RootFrame.Navigate(typeof(HostPage));
     }
 
-    // ! A restart cut in half (stopped but not started yet) would leave the PC unreachable, so the
-    //   window hides and only closes once the action has finished.
+    // ! A restart cut in half (stopped but not started yet) would leave the PC unreachable, so the window hides and
+    // ! only closes once the action has finished.
     private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        var pending = HostServiceControl.Pending;
+        var pending = HostServiceControlService.Pending;
         if (pending.IsCompleted) return;
         args.Cancel = true;
+        if (closing) return;
+        closing = true;
         sender.Hide();
         await pending;
         Close();

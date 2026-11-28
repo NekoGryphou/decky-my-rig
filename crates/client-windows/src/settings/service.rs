@@ -1,15 +1,16 @@
 use super::{
     consts::{
-        BACKUP_SEMANTICS, FILE_NAME, LOCK_NAME, OPEN_REPARSE_POINT, READ_AND_SECURE, REPARSE_POINT,
-        SHARE_NO_DELETE, WRITE_AND_SECURE,
+        BACKUP_SEMANTICS, FILE_NAME, LOCK_NAME, OPEN_REPARSE_POINT, READ_AND_SECURE, READ_ONLY,
+        REPARSE_POINT, SHARE_NO_DELETE, WRITE_AND_SECURE,
     },
-    native::{current_owners, link_count, owner_of, secure},
+    native::{current_owners, is_private, link_count, owner_of, secure},
     types::WindowsSettings,
 };
-use myrig_client::platform::{Settings, is_temporary_document, temporary_document_name};
+use myrig_client::platform::{Settings, remove_leftover_documents, temporary_document_name};
+use myrig_client::shared::read_bounded;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Write},
     os::windows::fs::{MetadataExt, OpenOptionsExt},
     path::Path,
     sync::{Mutex, PoisonError},
@@ -35,7 +36,7 @@ impl WindowsSettings {
         }
         // ? Opened as the reparse point itself, so the check below can see it.
         let handle = OpenOptions::new()
-            .access_mode(READ_AND_SECURE)
+            .access_mode(if create { READ_AND_SECURE } else { READ_ONLY })
             .share_mode(SHARE_NO_DELETE)
             .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
             .open(&directory)?;
@@ -49,6 +50,9 @@ impl WindowsSettings {
         }
         if create {
             secure(&handle, &owners[0], true)?;
+        } else if !is_private(&handle, &owners)? {
+            // ! Only creating the folder writes its ACL; every other open just checks it.
+            return Err(io::ErrorKind::PermissionDenied.into());
         }
         Ok(Self {
             directory,
@@ -81,11 +85,10 @@ impl Settings for WindowsSettings {
     }
 
     fn read(&self, limit: usize) -> io::Result<Option<Vec<u8>>> {
-        let mut file =
-            match self.open_inside(FILE_NAME, OpenOptions::new().access_mode(READ_AND_SECURE)) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-                other => other?,
-            };
+        let file = match self.open_inside(FILE_NAME, OpenOptions::new().access_mode(READ_ONLY)) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            other => other?,
+        };
         let metadata = file.metadata()?;
         if !metadata.is_file()
             || metadata.file_attributes() & REPARSE_POINT != 0
@@ -94,34 +97,19 @@ impl Settings for WindowsSettings {
         {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
-        // ? Like Linux's 0600 on every read: a document copied in from somewhere
-        //   doesn't keep a wider ACL.
-        secure(&file, &self.owners[0], false)?;
-        let mut raw = Vec::new();
-        (&mut file).take(limit as u64 + 1).read_to_end(&mut raw)?;
-        if raw.len() > limit {
-            return Err(io::ErrorKind::InvalidData.into());
+        // ! Reads only check the ACL. A document copied in from somewhere with a wider one is
+        // ! refused, saves included, until the user fixes its ACL or deletes it: nothing here
+        // ! repairs a file it didn't write.
+        if !is_private(&file, &self.owners)? {
+            return Err(io::ErrorKind::PermissionDenied.into());
         }
-        Ok(Some(raw))
+        read_bounded(file, limit).map(Some)
     }
 
     /// Writes a new private file next to the document, flushes it and renames
     /// it over `pcs.json`.
     fn replace(&self, contents: &[u8]) -> io::Result<()> {
-        // * Temp files left by killed saves. This runs under the store lock.
-        for entry in fs::read_dir(&self.directory)
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            if entry
-                .file_name()
-                .to_str()
-                .is_some_and(is_temporary_document)
-            {
-                let _ = fs::remove_file(entry.path());
-            }
-        }
+        remove_leftover_documents(&self.directory);
         let name = temporary_document_name();
         let result = self
             .open_inside(
@@ -132,8 +120,7 @@ impl Settings for WindowsSettings {
                     .create_new(true),
             )
             .and_then(|mut file| {
-                // ? Owned by this user even when running elevated, so a normal
-                //   run can read it.
+                // ? Owned by this user even when running elevated, so a normal run can read it.
                 secure(&file, &self.owners[0], false)?;
                 file.write_all(contents)?;
                 file.sync_all()

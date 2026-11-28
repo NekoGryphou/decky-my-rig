@@ -27,8 +27,8 @@ fn ipv4(address: *const libc::sockaddr) -> Option<Ipv4Addr> {
     if address.is_null() {
         return None;
     }
-    // ! SAFETY: a non-null sockaddr from getifaddrs; it is read as sockaddr_in
-    //   only after its family says it is one.
+    // ! SAFETY: a non-null sockaddr from getifaddrs; it is read as sockaddr_in only after its
+    // ! family says it is one.
     unsafe {
         if i32::from((*address).sa_family) != libc::AF_INET {
             return None;

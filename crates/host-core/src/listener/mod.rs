@@ -1,9 +1,10 @@
 mod consts;
+mod service;
 mod types;
 mod utils;
 
+pub use service::run;
 pub use types::Bind;
-pub use utils::{bind_any, run};
 
 #[cfg(test)]
 mod tests;

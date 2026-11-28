@@ -1,4 +1,5 @@
 use super::consts::{EM_AARCH64, EM_X86_64, PE_AARCH64, PE_X86_64};
+use super::stamp::{check_stamp, input_hash, write_stamp};
 use super::utils::{
     crate_dependencies, deterministic_zip, hex_sha256, is_pe, is_static_elf, reject_credentials,
     release_files, valid_version, write_bin,
@@ -210,6 +211,97 @@ fn agents_land_in_the_store_bin_folder_without_the_prefix() {
     let outside = BTreeMap::from([("main.py".to_owned(), Vec::new())]);
     assert!(write_bin(&out, &outside).is_err());
     std::fs::remove_dir_all(&out).unwrap();
+}
+
+#[test]
+fn bin_files_are_written_into_a_missing_output_directory() {
+    let scratch = tempfile_directory();
+    let out = scratch.join("not/yet/created");
+    let payload = BTreeMap::from([("bin/myrig-x86_64-linux".to_owned(), b"agent".to_vec())]);
+    write_bin(&out, &payload).unwrap();
+    assert_eq!(
+        std::fs::read(out.join("myrig-x86_64-linux")).unwrap(),
+        b"agent"
+    );
+    std::fs::remove_dir_all(&scratch).unwrap();
+}
+
+/// A workspace folder holding the files an agent's stamp covers, with one crate
+/// and a file outside the agent's inputs.
+fn workspace() -> (std::path::PathBuf, std::path::PathBuf) {
+    let root = tempfile_directory();
+    let crate_dir = root.join("crates/app");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::create_dir_all(crate_dir.join("tests")).unwrap();
+    for (path, text) in [
+        ("Cargo.toml", "[workspace]\n"),
+        ("Cargo.lock", "# lock\n"),
+        ("crates/app/Cargo.toml", "[package]\n"),
+        ("crates/app/src/lib.rs", "pub fn a() {}\n"),
+        ("crates/app/tests/it.rs", "#[test] fn t() {}\n"),
+    ] {
+        std::fs::write(root.join(path), text).unwrap();
+    }
+    (root, crate_dir)
+}
+
+fn set_mtime(path: &Path, seconds: u64) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        .unwrap();
+}
+
+#[test]
+fn an_edit_that_keeps_the_mtime_makes_the_agent_stale() {
+    let (root, crate_dir) = workspace();
+    let source = crate_dir.join("src/lib.rs");
+    let crates = [crate_dir.clone()];
+    let binary = root.join("myrig");
+    set_mtime(&source, 100);
+    write_stamp(&binary, &input_hash(&root, &crates).unwrap()).unwrap();
+    std::fs::write(&source, "pub fn b() {}\n").unwrap();
+    set_mtime(&source, 100);
+    assert!(check_stamp(&binary, &input_hash(&root, &crates).unwrap()).is_err());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_newer_mtime_with_the_same_content_is_not_stale() {
+    let (root, crate_dir) = workspace();
+    let source = crate_dir.join("src/lib.rs");
+    let crates = [crate_dir.clone()];
+    let binary = root.join("myrig");
+    write_stamp(&binary, &input_hash(&root, &crates).unwrap()).unwrap();
+    set_mtime(&source, 9_999_999);
+    assert!(check_stamp(&binary, &input_hash(&root, &crates).unwrap()).is_ok());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_missing_stamp_or_a_new_input_file_is_stale() {
+    let (root, crate_dir) = workspace();
+    let crates = [crate_dir.clone()];
+    let binary = root.join("myrig");
+    let hash = input_hash(&root, &crates).unwrap();
+    assert!(check_stamp(&binary, &hash).is_err());
+    write_stamp(&binary, &hash).unwrap();
+    assert!(check_stamp(&binary, &hash).is_ok());
+    std::fs::write(crate_dir.join("src/extra.rs"), "").unwrap();
+    assert!(check_stamp(&binary, &input_hash(&root, &crates).unwrap()).is_err());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn files_outside_the_agent_inputs_do_not_change_the_hash() {
+    let (root, crate_dir) = workspace();
+    let crates = [crate_dir.clone()];
+    let before = input_hash(&root, &crates).unwrap();
+    std::fs::write(crate_dir.join("tests/it.rs"), "#[test] fn u() {}\n").unwrap();
+    assert_eq!(before, input_hash(&root, &crates).unwrap());
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 fn tempfile_directory() -> std::path::PathBuf {

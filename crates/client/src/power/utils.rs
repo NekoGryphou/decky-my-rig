@@ -1,7 +1,7 @@
 use super::types::Entry;
 use crate::store::PcConfig;
-use myrig_protocol::api::{PcSettings, PowerState};
-use std::time::Instant;
+use myrig_protocol::api::PowerState;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) fn new_entry(config: PcConfig) -> Entry {
     Entry {
@@ -39,12 +39,13 @@ pub(super) fn deadline_passed(entry: &Entry, now: Instant) -> bool {
         .is_some_and(|deadline| now >= deadline)
 }
 
-pub(super) fn settings_of(pc: &PcConfig) -> PcSettings {
-    PcSettings {
-        id: pc.id.to_string(),
-        name: pc.name.clone(),
-        host: pc.host.to_string(),
-        port: pc.port,
-        mac: pc.mac.clone(),
-    }
+/// Where this process's revisions start: the clock in microseconds. The
+/// frontend remembers the last revision it saw, so a restarted agent has to
+/// start above anything a previous process published (publishes are far less
+/// frequent than one per microsecond). It stays below 2^53, the largest
+/// integer JavaScript keeps exactly.
+pub(super) fn revision_base() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| u64::try_from(elapsed.as_micros()).unwrap_or(0))
 }

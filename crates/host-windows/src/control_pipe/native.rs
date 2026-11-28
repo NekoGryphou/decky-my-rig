@@ -2,6 +2,7 @@
 use super::consts::{
     MANAGER_USERS_VALUE, MANAGERS_GROUP, MANAGERS_KEY, MAX_ACTIVE, REVERT_FAILURE,
 };
+use super::types::Allowed;
 use crate::shared::consts::FAILURE;
 use crate::shared::native::{LocalAllocation, account_sid, wide, with_security};
 pub(super) use crate::shared::native::{service_sid_text, sid_text};
@@ -45,8 +46,8 @@ pub(super) fn group_members() -> Result<Vec<String>, &'static str> {
     let group = wide(MANAGERS_GROUP);
     let mut buffer: *mut u8 = std::ptr::null_mut();
     let (mut read, mut total) = (0u32, 0u32);
-    // ! SAFETY: `group` is NUL-terminated and live; `buffer` receives a block
-    //   that NetApiBufferFree releases below; the counts are valid out-pointers.
+    // ! SAFETY: `group` is NUL-terminated and live; `buffer` receives a block that NetApiBufferFree
+    // ! releases below; the counts are valid out-pointers.
     let status = unsafe {
         NetLocalGroupGetMembers(
             PCWSTR::null(),
@@ -104,9 +105,8 @@ pub(super) fn local_account_sid(
     expected: SID_NAME_USE,
 ) -> Result<(String, Vec<u32>), &'static str> {
     let computer = crate::shared::native::computer_name()?;
-    // ? LookupAccountNameW doesn't understand the ".\" shorthand, and using the
-    //   computer name keeps a domain account with the same name from being
-    //   picked.
+    // ? LookupAccountNameW doesn't understand the ".\" shorthand, and using the computer name keeps
+    // ? a domain account with the same name from being picked.
     let (mut sid, kind) = account_sid(&format!(r"{computer}\{name}"))?;
     if kind != expected {
         return Err(FAILURE);
@@ -120,7 +120,8 @@ pub(super) fn create_pipe(
     first: bool,
 ) -> Result<NamedPipeServer, &'static str> {
     with_security(sddl, |attributes| {
-        // ! SAFETY: `attributes` and its descriptor stay alive for the call, which copies the security.
+        // ! SAFETY: `attributes` and its descriptor stay alive for the call, which copies the
+        // ! security.
         unsafe {
             ServerOptions::new()
                 .first_pipe_instance(first)
@@ -135,17 +136,28 @@ pub(super) fn create_pipe(
 pub(super) fn well_known(kind: WELL_KNOWN_SID_TYPE) -> Result<Vec<u32>, &'static str> {
     let mut sid = vec![0u32; 32];
     let mut length = (sid.len() * 4) as u32;
-    // ! SAFETY: `sid` is a 128-byte buffer, larger than SECURITY_MAX_SID_SIZE, and `length` states its size.
+    // ! SAFETY: `sid` is a 128-byte buffer, larger than SECURITY_MAX_SID_SIZE, and `length` states
+    // ! its size.
     unsafe { CreateWellKnownSid(kind, None, Some(PSID(sid.as_mut_ptr().cast())), &mut length) }
         .map_err(|_| FAILURE)?;
     Ok(sid)
 }
 
-pub(super) fn authorize(pipe: &OwnedHandle, allowed: &[Vec<u32>]) -> Result<bool, &'static str> {
-    // ! Clients connect at Identification level, so the caller's token can only be
-    //   opened as the service itself (OpenAsSelf). Impersonation lasts just long
-    //   enough to take that token; membership is checked after reverting.
-    // ! SAFETY: `pipe` is an open pipe handle owned by the caller for the whole call.
+pub(super) fn authorize(pipe: &OwnedHandle, allowed: &Allowed) -> Result<bool, &'static str> {
+    authorize_with(pipe, allowed, group_members)
+}
+
+/// `members` reads the current members of the managers group; it only runs for
+/// a caller who matched a recorded user and nothing else.
+pub(super) fn authorize_with(
+    pipe: &OwnedHandle,
+    allowed: &Allowed,
+    members: impl FnOnce() -> Result<Vec<String>, &'static str>,
+) -> Result<bool, &'static str> {
+    // ! Clients connect at Identification level, so the caller's token can only be opened as the
+    // ! service itself (OpenAsSelf). Impersonation lasts just long enough to take that token;
+    // ! membership is checked after reverting. SAFETY: `pipe` is an open pipe handle owned by the
+    // ! caller for the whole call.
     if unsafe { ImpersonateNamedPipeClient(HANDLE(pipe.as_raw_handle())) }.is_err() {
         return Ok(false);
     }
@@ -164,8 +176,7 @@ pub(super) fn authorize(pipe: &OwnedHandle, allowed: &[Vec<u32>]) -> Result<bool
     let Some(token) = token else {
         return Ok(false);
     };
-    let mut authorized = false;
-    for sid in allowed {
+    let member_of = |sid: &[u32]| {
         let mut member = false.into();
         // ! SAFETY: `token` is an open token handle and `sid` points to a complete SID buffer.
         let result = unsafe {
@@ -175,14 +186,37 @@ pub(super) fn authorize(pipe: &OwnedHandle, allowed: &[Vec<u32>]) -> Result<bool
                 &mut member,
             )
         };
-        authorized |= result.is_ok() && member.as_bool();
+        result.is_ok() && member.as_bool()
+    };
+    // * Every SID is checked, not just until the first match.
+    let mut authorized = false;
+    for sid in &allowed.always {
+        authorized |= member_of(sid);
     }
-    Ok(authorized)
+    if authorized {
+        return Ok(true);
+    }
+    let matched: Vec<&str> = allowed
+        .recorded_users
+        .iter()
+        .filter(|user| member_of(&user.words))
+        .map(|user| user.text.as_str())
+        .collect();
+    if matched.is_empty() {
+        return Ok(false);
+    }
+    // ! A recorded user counts only while still in the group, so removing them takes effect at
+    // ! once. A group that can't be read refuses.
+    let current = members().unwrap_or_default();
+    Ok(matched
+        .iter()
+        .any(|text| current.iter().any(|member| member == text)))
 }
 
 pub(super) fn duplicate_pipe(pipe: &NamedPipeServer) -> Result<OwnedHandle, &'static str> {
     let mut duplicate = HANDLE::default();
-    // ! SAFETY: both process handles are the current-process pseudo-handle and `pipe` is open for the call.
+    // ! SAFETY: both process handles are the current-process pseudo-handle and `pipe` is open for
+    // ! the call.
     unsafe {
         DuplicateHandle(
             GetCurrentProcess(),

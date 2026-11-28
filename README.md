@@ -208,6 +208,11 @@ On Windows, in PowerShell:
 
 # Just the installer
 .\packaging\windows\build_installer.ps1 [-Arch aarch64]
+
+# Install, upgrade and uninstall the installer on this PC. It changes services,
+# the firewall and ProgramData, so it needs -Confirm, a signed-in user, and no
+# My Rig already installed. Not part of the checks above.
+.\tests\installer\end_to_end.ps1 -Installer .\out\release\<installer>.exe -Confirm
 ```
 
 ### Rules

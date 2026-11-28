@@ -1,4 +1,4 @@
-// Needs RegisteredAppDirectory, defined by the installer (storage.iss) or a fixture.
+// - Needs RegisteredAppDirectory, defined by the installer (storage.iss) or a fixture.
 function DirectoryIsEmpty(Directory: String): Boolean;
 var
   Entry: TFindRec;

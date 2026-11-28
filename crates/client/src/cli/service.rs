@@ -1,11 +1,11 @@
 use super::{
-    consts::{OK, REFUSED, STATUS_DEADLINE, UNREACHABLE, USAGE},
+    consts::{OK, REFUSED, SHUTDOWN_BOUND, UNREACHABLE, USAGE},
     messages::{
         CANCELLED, CODE_PROMPT, IDENTITY_CHANGED, INCOMPATIBLE, MAC_PROMPT, NO_PCS, NOT_PAIRED,
         OFFLINE, ONLINE, SHUTTING_DOWN, UNREACHABLE_PREFIX, USAGE_TEXT,
     },
     types::{Command, Failure, Terminal},
-    utils::{parse, refused, resolve},
+    utils::{parse, refused, resolve, stop_runtime},
 };
 use crate::{
     agent::serve,
@@ -17,19 +17,27 @@ use crate::{
     shared::{PublicError, normalize_host, normalize_mac, normalize_port},
     store::{PcChanges, PcConfig, PcInput, Store},
 };
-use myrig_protocol::lan::HostState;
-use std::{io::Write, net::Ipv4Addr, path::Path, process::ExitCode, sync::Arc};
+use myrig_protocol::{api::PcIssue, lan::HostState};
+use std::{ffi::OsString, io::Write, net::Ipv4Addr, path::Path, process::ExitCode, sync::Arc};
 use uuid::Uuid;
+
+const NOT_TEXT: &str = "An argument is not valid text.";
+
+/// The arguments as text, or `None` if any is not valid UTF-8.
+pub(super) fn text_arguments(arguments: impl Iterator<Item = OsString>) -> Option<Vec<String>> {
+    arguments
+        .map(|argument| argument.into_string().ok())
+        .collect()
+}
 
 /// Entry point of `myrig`: parses the command line and runs it.
 pub fn main(platform: Arc<dyn Platform>) -> ExitCode {
-    // * A non-UTF-8 argument is a usage error, not a panic.
-    let arguments: Vec<String> = std::env::args_os()
-        .skip(1)
-        .map(|argument| argument.into_string().unwrap_or_default())
-        .collect();
-    // ? One thread is enough: the work is network I/O, and Argon2 runs on the
-    //   blocking pool.
+    // * A non-UTF-8 argument is a usage error, not a panic or an empty name.
+    let Some(arguments) = text_arguments(std::env::args_os().skip(1)) else {
+        eprintln!("{NOT_TEXT}\n{USAGE_TEXT}");
+        return ExitCode::from(USAGE);
+    };
+    // ? One thread is enough: the work is network I/O, and Argon2 runs on the blocking pool.
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -38,13 +46,14 @@ pub fn main(platform: Arc<dyn Platform>) -> ExitCode {
     };
     if let Some(Command::Agent { store }) = parse(&arguments) {
         let input = tokio::io::BufReader::new(tokio::io::stdin());
-        return match runtime.block_on(serve(platform, &store, input, tokio::io::stdout())) {
-            Ok(()) => ExitCode::SUCCESS,
+        let code = match runtime.block_on(serve(platform, &store, input, tokio::io::stdout())) {
+            Ok(()) => OK,
             Err(error) => {
                 eprintln!("{error}");
-                ExitCode::from(REFUSED)
+                REFUSED
             }
         };
+        return finish(runtime, code);
     }
     let store = match platform.settings_directory() {
         Ok(store) => store,
@@ -59,7 +68,20 @@ pub fn main(platform: Arc<dyn Platform>) -> ExitCode {
         output: &mut stdout,
         errors: &mut stderr,
     };
-    ExitCode::from(runtime.block_on(run(platform, &arguments, &store, terminal)))
+    let code = runtime.block_on(run(platform, &arguments, &store, terminal));
+    finish(runtime, code)
+}
+
+/// Stops the runtime within `SHUTDOWN_BOUND`; a save still stuck then turns a
+/// success into a refusal, since it may not have been written.
+fn finish(runtime: tokio::runtime::Runtime, code: u8) -> ExitCode {
+    match stop_runtime(runtime, SHUTDOWN_BOUND) {
+        Ok(()) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(if code == OK { REFUSED } else { code })
+        }
+    }
 }
 
 /// Runs one command against the saved PCs in `store` and returns the exit code
@@ -128,7 +150,7 @@ impl Session<'_> {
             Command::Stop { name, yes } => {
                 let pc = resolve(&pcs, &name)?;
                 self.confirm(&format!("Shut down {}?", pc.name), yes)?;
-                match client(&pc).shutdown(Uuid::new_v4()).await {
+                match HostClient::for_pc(&pc).shutdown(Uuid::new_v4()).await {
                     Ok(result) if result.test => {
                         self.say(&format!(
                             "Test shutdown received by {}; test mode keeps the PC on.",
@@ -169,7 +191,7 @@ impl Session<'_> {
                 let pc = resolve(&pcs, &name)?;
                 self.confirm(&format!("Remove {}?", pc.name), yes)?;
                 store.delete(pc.id).map_err(|error| refused(error.0))?;
-                let forgot = match client(&pc).unpair().await {
+                let forgot = match HostClient::for_pc(&pc).unpair().await {
                     Ok(()) => "The PC forgot this device.",
                     Err(_) => "The PC did not answer; remove this device in My Rig on the PC.",
                 };
@@ -202,7 +224,7 @@ impl Session<'_> {
         request_code(host, port, &device_name(self.platform.as_ref()))
             .await
             .map_err(pairing_failure)?;
-        let code = self.ask(CODE_PROMPT);
+        let code = self.ask_secret(CODE_PROMPT);
         let paired = pair(host, port, &code, None)
             .await
             .map_err(pairing_failure)?;
@@ -227,9 +249,8 @@ impl Session<'_> {
     ) -> Result<(), Failure> {
         let mac = match detect_mac(self.platform.as_ref(), host) {
             Ok(mac) => mac,
-            // * The PC has already saved this device, so keep asking until the
-            //   MAC is valid. We only give up, and revoke the pairing, when input
-            //   ends.
+            // * The PC has already saved this device, so keep asking until the MAC is valid. We
+            // * only give up, and revoke the pairing, when input ends.
             Err(_) => loop {
                 let answer = self.prompt(MAC_PROMPT);
                 match normalize_mac(answer.as_deref().unwrap_or_default()) {
@@ -267,6 +288,19 @@ impl Session<'_> {
         self.prompt(prompt).unwrap_or_default()
     }
 
+    /// Reads an answer the PC shows, with echo off, so it isn't printed to the
+    /// terminal's history or a screen share.
+    fn ask_secret(&mut self, prompt: &str) -> String {
+        let hidden = self.platform.hide_input();
+        let answer = self.ask(prompt);
+        if hidden.is_some() {
+            // ? With echo off the newline the user typed isn't shown, so end the line here.
+            self.say("");
+        }
+        drop(hidden);
+        answer
+    }
+
     /// The trimmed answer, or `None` once input has ended.
     fn prompt(&mut self, prompt: &str) -> Option<String> {
         let _ = write!(self.output, "{prompt}");
@@ -283,19 +317,9 @@ impl Session<'_> {
     }
 }
 
-fn client(pc: &PcConfig) -> HostClient {
-    HostClient::new(
-        pc.host,
-        pc.port,
-        Some(pc.authentication.token.to_string()),
-        Some(pc.authentication.tls_pin),
-        STATUS_DEADLINE,
-    )
-}
-
 async fn status(pc: &PcConfig) -> &'static str {
     describe(
-        client(pc)
+        HostClient::for_pc(pc)
             .status()
             .await
             .map(|status| (status.host_id, status.state)),
@@ -309,9 +333,12 @@ fn describe(status: Result<(Uuid, HostState), HostError>, pc: &PcConfig) -> &'st
         Ok((_, HostState::Online)) => ONLINE,
         Ok((_, HostState::ShuttingDown)) => SHUTTING_DOWN,
         Err(HostError::Connection | HostError::Timeout) => OFFLINE,
-        Err(HostError::Unauthorized) => NOT_PAIRED,
-        Err(HostError::PinMismatch) => IDENTITY_CHANGED,
-        Err(HostError::UnsupportedProtocol | HostError::Invalid) => INCOMPATIBLE,
+        // ? An invalid reply is a compatibility problem, as in the plugin.
+        Err(error) => match error.issue().unwrap_or(PcIssue::Compatibility) {
+            PcIssue::Identity => IDENTITY_CHANGED,
+            PcIssue::Authentication => NOT_PAIRED,
+            PcIssue::Compatibility => INCOMPATIBLE,
+        },
     }
 }
 

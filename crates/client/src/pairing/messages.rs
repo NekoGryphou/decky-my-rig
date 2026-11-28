@@ -6,3 +6,6 @@ pub(super) const UNREACHABLE: &str = "PC is unreachable.";
 pub(super) const UNREACHABLE_FINISH: &str = "PC is unreachable. Windows may retain this pairing.";
 pub(super) const IDENTITY_CHANGED: &str = "Host identity changed. Generate a new pairing code.";
 pub(super) const CODE_NOT_SHOWN: &str = "PC could not show a pairing code.";
+// ! The host refuses a full PC before it issues anything, so nothing is left behind.
+pub(super) const DEVICE_LIMIT: &str =
+    "This PC is at its device limit. Remove a paired device, then pair again.";

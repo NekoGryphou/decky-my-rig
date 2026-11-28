@@ -4,8 +4,9 @@ use crate::{
 };
 use std::{
     net::Ipv4Addr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicBool},
 };
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 pub struct Drafts {
@@ -13,6 +14,11 @@ pub struct Drafts {
     /// This device's name, as the PC shows it while pairing.
     pub(super) device: String,
     pub(super) state: Mutex<DraftState>,
+    /// Set while an exchange or save may hold a credential the PC issued that
+    /// isn't stored or revoked yet. Only one runs at a time.
+    pub(super) holding: AtomicBool,
+    /// Saves still writing or revoking, which `close` waits for.
+    pub(super) settling: Mutex<JoinSet<()>>,
 }
 
 /// Identifies one reserved draft. It goes stale once that draft is canceled or

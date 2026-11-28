@@ -5,7 +5,7 @@ import {
   Field,
 } from "@decky/ui";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { fetchSettings } from "../shared/api.service";
+import { api } from "../shared/api.service";
 import type { PcSettings } from "../shared/api.types";
 import { AlertView } from "../shared/alert.view";
 import { EditorNavigation } from "../shared/navigation.service";
@@ -16,25 +16,45 @@ import { emptyStyle, buttonStyle } from "./settings.styles";
 import { SettingsLayout } from "./settings-layout.view";
 import { attend } from "../shared/attention.service";
 
+/** The status text follows the power store; the page around it does not. */
+function PcStatus({ id, host }: { id: string; host: string }) {
+  const status = useSyncExternalStore(powerService.subscribe, () =>
+    powerService.statusOf(id),
+  );
+  return `${status} · ${host}`;
+}
+
 // noinspection HtmlUnknownAttribute
 export function SettingsPage() {
   const [pcs, setPcs] = useState<PcSettings[] | null>(null);
   const [error, setError] = useState("");
-  // - Re-render when power status changes.
-  useSyncExternalStore(powerService.subscribe, powerService.getSnapshot);
   useEffect(() => attend(), []);
   useEffect(() => {
     let active = true;
+    let latest = 0;
+    const load = () => {
+      const request = ++latest;
+      api
+        .fetchSettings()
+        .then((next) => {
+          if (!active || request !== latest) return;
+          setPcs(next);
+          setError("");
+        })
+        .catch(() => {
+          if (active && request === latest) setError(SETTINGS_ERROR);
+        });
+    };
+    // * Showing the page again is the retry: nothing else reloads the list.
+    const onShow = () => {
+      if (document.visibilityState === "visible") load();
+    };
     EditorNavigation.reset();
-    void fetchSettings()
-      .then((next) => {
-        if (active) setPcs(next);
-      })
-      .catch(() => {
-        if (active) setError(SETTINGS_ERROR);
-      });
+    load();
+    document.addEventListener("visibilitychange", onShow);
     return () => {
       active = false;
+      document.removeEventListener("visibilitychange", onShow);
     };
   }, []);
   return (
@@ -58,7 +78,7 @@ export function SettingsPage() {
             <Field
               key={pc.id}
               label={pc.name}
-              description={`${powerService.statusOf(pc.id)} · ${pc.host}`}
+              description={<PcStatus id={pc.id} host={pc.host} />}
               inlineWrap="keep-inline"
               childrenContainerWidth="min"
             >

@@ -50,7 +50,7 @@ async fn open_code(host: &Arc<crate::host::Host>) {
         "12345678",
         [7; 32],
         b"cert",
-        [1; 32],
+        &[1; 32],
         uuid::Uuid::from_u128(1),
         Arc::new(|_| Ok(())),
     )
@@ -152,8 +152,7 @@ async fn failed_codes_slow_down_network_requests_until_a_pairing_succeeds() {
 
 #[tokio::test]
 async fn opening_a_code_never_replaces_one_someone_has_tried() {
-    // * This applies to every opener. To start over, close the code first (Cancel
-    //   in the app).
+    // * This applies to every opener. To start over, close the code first (Cancel in the app).
     let host = empty_registry_host();
     let binding: [u8; 32] = Sha256::digest(b"cert").into();
     open_code(&host).await;
@@ -165,7 +164,7 @@ async fn opening_a_code_never_replaces_one_someone_has_tried() {
             "87654321",
             [7; 32],
             b"cert",
-            [2; 32],
+            &[2; 32],
             uuid::Uuid::from_u128(2),
             Arc::new(|_| Ok(())),
         )

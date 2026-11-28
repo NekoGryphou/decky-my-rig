@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using MyRigConfig.Core.Shared;
 
+
 namespace MyRigConfig.Core.LocalControl;
 
 internal sealed record StatusRequest(int Version, string Operation);
@@ -24,7 +25,11 @@ internal sealed record RemoveReply(int Version, bool Ok, string HostId, bool Rem
 internal sealed record RenameReply(int Version, bool Ok, string HostId, bool Renamed);
 internal sealed record SetPortReply(int Version, bool Ok, string HostId, int Port);
 internal sealed record SetTestModeReply(int Version, bool Ok, string HostId, bool TestMode);
-internal sealed record PairingReply(int Version, bool Ok, string HostId, string Code, int ExpiresInSeconds);
+internal sealed record PairingReply(int Version, bool Ok, string HostId, string Code, int ExpiresInSeconds)
+{
+    // ! The generated text would include the code.
+    public override string ToString() => "Pairing reply";
+}
 
 internal enum LocalControlOperation { Status, List, Remove, Rename, OpenPairing, SetPort, SetTestMode, ClosePairing }
 
@@ -40,3 +45,9 @@ internal sealed record LocalControlStatusReply(Guid HostId, int Port, bool TestM
 internal sealed record LocalControlTestModeReply(Guid HostId, bool TestMode) : LocalControlHostReply(HostId);
 internal sealed record LocalControlClosePairingReply(Guid HostId) : LocalControlHostReply(HostId);
 internal sealed record LocalControlErrorReply(string Error) : LocalControlReply;
+
+internal sealed record LocalControlPairingReply(Guid HostId, string Code) : LocalControlHostReply(HostId)
+{
+    // ! The generated text would include the code.
+    public override string ToString() => "Local pairing approval";
+}

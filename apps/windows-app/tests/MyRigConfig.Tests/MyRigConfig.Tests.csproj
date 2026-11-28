@@ -5,6 +5,10 @@
     <!-- The app restores this project for win-x64; declaring it keeps one lock
          file valid for both the app and the test restores. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- ! Integration tests read the real machine TCP tables; they run only when asked for
+         (dotnet test, filter TestCategory=Integration). -->
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory)test.runsettings</RunSettingsFilePath>
+    <VSTestTestCaseFilter>TestCategory!=Integration</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,24 +17,14 @@
     <PackageReference Include="MSTest" />
   </ItemGroup>
 
+  <!-- The view-model layer of the app compiles into the tests as it is; only files that need the
+       WinUI runtime stay out: XAML code-behind, App.xaml.cs, custom controls, the shell. -->
+  <PropertyGroup>
+    <AppSource>../../src/MyRigConfig.App</AppSource>
+  </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/MyRigConfig.App/Features/Rename/RenameDialogViewModel.cs" Link="ViewModels/RenameDialogViewModel.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Rename/RenameMessages.cs" Link="ViewModels/RenameMessages.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/ManagedDeviceSummary.cs" Link="ViewModels/ManagedDeviceSummary.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostPageConstants.cs" Link="ViewModels/HostPageConstants.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostViewModel.cs" Link="ViewModels/HostViewModel.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostViewModel.Settings.cs" Link="ViewModels/HostViewModel.Settings.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostMessages.cs" Link="ViewModels/HostMessages.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostTypes.cs" Link="ViewModels/HostTypes.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Host/HostHelpers.cs" Link="ViewModels/HostHelpers.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Shared/SharedTypes.cs" Link="Shared/SharedTypes.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Shared/SharedMessages.cs" Link="Shared/SharedMessages.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingViewModel.cs" Link="ViewModels/PairingViewModel.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingMessages.cs" Link="ViewModels/PairingMessages.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingConstants.cs" Link="ViewModels/PairingConstants.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Pairing/PairingTypes.cs" Link="ViewModels/PairingTypes.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Port/PortDialogViewModel.cs" Link="ViewModels/PortDialogViewModel.cs" />
-    <Compile Include="../../src/MyRigConfig.App/Features/Port/PortMessages.cs" Link="ViewModels/PortMessages.cs" />
+    <Compile Include="$(AppSource)/**/*.cs" Link="App/%(RecursiveDir)%(Filename)%(Extension)"
+             Exclude="$(AppSource)/obj/**;$(AppSource)/bin/**;$(AppSource)/App.xaml.cs;$(AppSource)/**/*.xaml.cs;$(AppSource)/Shell/Program.cs;$(AppSource)/Shell/ProgramNative.cs;$(AppSource)/Shell/MainWindowNative.cs;$(AppSource)/Features/Host/InvokableSettingsCard*.cs;$(AppSource)/Features/Host/HostPageHelpers.cs" />
   </ItemGroup>
 
   <ItemGroup>

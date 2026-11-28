@@ -187,9 +187,7 @@
                         Text="{x:Bind ViewModel.Port, Mode=OneWay}" />
                 </StackPanel>
             </local:InvokableSettingsCard>
-            <toolkit:SettingsCard
-                Description="{x:Bind local:HostMessages.TestModeDescription, Mode=OneTime}"
-                Header="{x:Bind local:HostMessages.TestModeLabel, Mode=OneTime}">
+            <toolkit:SettingsCard Header="{x:Bind local:HostMessages.TestModeLabel, Mode=OneTime}">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xEBE8;" />
                 </toolkit:SettingsCard.HeaderIcon>

@@ -13,7 +13,13 @@ pub(super) fn drive_is_registered(root: &str, mounts: &[u16]) -> bool {
 }
 
 pub(super) fn check_security(security: &Security, role: PathRole) -> Result<(), &'static str> {
-    if !TRUSTED_OWNERS.contains(&security.owner.as_str()) {
+    let owner_rights_limit_owner = security
+        .rules
+        .iter()
+        .any(|rule| rule.allow && rule.principal == OWNER_RIGHTS);
+    let trusted_owner = TRUSTED_OWNERS.contains(&security.owner.as_str())
+        || (security.owner == LOCAL_SERVICE && owner_rights_limit_owner);
+    if !trusted_owner {
         return Err(FAILURE);
     }
     for rule in &security.rules {
@@ -49,20 +55,44 @@ pub(super) fn check_path(path: &Path) -> Result<(), &'static str> {
         return Err(FAILURE);
     }
     for name in text.split(['\\', '/']).skip(1) {
-        let device = name.split('.').next().unwrap_or("").to_ascii_uppercase();
-        let numbered_device = device
-            .strip_prefix("COM")
-            .or_else(|| device.strip_prefix("LPT"))
-            .is_some_and(|suffix| suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'));
         if name.is_empty()
             || matches!(name, "." | "..")
             || name.ends_with(['.', ' '])
             || name.chars().any(|ch| ch < ' ' || "<>:\"|?*".contains(ch))
-            || RESERVED_NAMES.contains(&device.as_str())
-            || numbered_device
+            || is_device_name(name)
         {
             return Err(FAILURE);
         }
     }
     Ok(())
+}
+
+/// Windows treats these names as devices in any folder, with or without an
+/// extension and ignoring case and trailing spaces before the extension.
+fn is_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ')
+        .to_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix).is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2"
+                    | "3"
+                    | "4"
+                    | "5"
+                    | "6"
+                    | "7"
+                    | "8"
+                    | "9"
+                    | "\u{b9}"
+                    | "\u{b2}"
+                    | "\u{b3}"
+            )
+        })
+    };
+    RESERVED_NAMES.contains(&stem.as_str()) || numbered("COM") || numbered("LPT")
 }

@@ -5,13 +5,17 @@ mod version;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: cargo xtask plugin [--prebuilt-linux] [--windows x86_64,aarch64]
-       cargo xtask agents <directory>";
+       cargo xtask agents <directory>
+       cargo xtask stamp <agent binary>";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
     if let ["agents", directory] = arguments.as_slice() {
         return finish(plugin::agents(std::path::Path::new(directory)));
+    }
+    if let ["stamp", binary] = arguments.as_slice() {
+        return finish(plugin::stamp(std::path::Path::new(binary)));
     }
     let (prebuilt_linux, rest) = match arguments.as_slice() {
         ["plugin", "--prebuilt-linux", rest @ ..] => (true, rest),

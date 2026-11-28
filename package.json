@@ -1,6 +1,6 @@
 {
   "name": "decky-my-rig",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -15,17 +15,17 @@
   },
   "dependencies": {
     "@decky/api": "^1.1.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "@decky/ui": "^5.0.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
     "react-icons": "^5.7.0"
   },
   "devDependencies": {
-    "@decky/ui": "^4.11.1",
     "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.5",
+    "@types/react": "~19.1.17",
+    "@types/react-dom": "~19.1.11",
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",

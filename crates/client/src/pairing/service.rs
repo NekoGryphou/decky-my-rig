@@ -1,9 +1,9 @@
 use super::{
     consts::{
         BOOTSTRAP_VERSION, BUSY_RETRY, BUSY_STATUS, CODE_REQUEST_DEADLINE, CODE_SHOWN_STATUSES,
-        PAIR_DEADLINE, REVOKE_DEADLINE,
+        FINISH_DEADLINE, PAIR_DEADLINE, REVOKE_DEADLINE,
     },
-    messages::{CODE_EXPIRED, CODE_INCORRECT, CODE_NOT_SHOWN, FAILED, UNREACHABLE},
+    messages::{CODE_EXPIRED, CODE_INCORRECT, CODE_NOT_SHOWN, DEVICE_LIMIT, FAILED, UNREACHABLE},
     types::{Failure, Paired},
     utils::{bootstrap_reply, public_message, remaining},
 };
@@ -22,7 +22,11 @@ use myrig_protocol::{
     validation::{canonical_uuid, decode_hex, lower_hex, valid_pairing_code},
 };
 use sha2::{Digest, Sha256};
-use std::{net::Ipv4Addr, time::Instant};
+use std::{
+    net::Ipv4Addr,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Instant,
+};
 
 /// Asks the PC to show a pairing code to whoever is sitting in front of it.
 /// This is sent before the PC is trusted, so it only carries this device's
@@ -70,20 +74,31 @@ pub async fn pair(
     code: &str,
     previous: Option<(&[u8; 32], &str)>,
 ) -> Result<Paired, PublicError> {
+    pair_tracked(host, port, code, previous, &AtomicBool::new(false)).await
+}
+
+/// Like `pair`, and sets `finishing` once the finish request is about to go
+/// out: from then on the PC may hold a credential this device doesn't.
+pub(crate) async fn pair_tracked(
+    host: Ipv4Addr,
+    port: u16,
+    code: &str,
+    previous: Option<(&[u8; 32], &str)>,
+    finishing: &AtomicBool,
+) -> Result<Paired, PublicError> {
     if !valid_pairing_code(code) {
         return Err(PublicError(FAILED));
     }
-    let mut finishing = false;
     exchange(
         host,
         port,
         code,
         previous,
         Instant::now() + PAIR_DEADLINE,
-        &mut finishing,
+        finishing,
     )
     .await
-    .map_err(|failure| PublicError(public_message(failure, finishing)))
+    .map_err(|failure| PublicError(public_message(failure, finishing.load(Ordering::SeqCst))))
 }
 
 async fn exchange(
@@ -92,7 +107,7 @@ async fn exchange(
     code: &str,
     previous: Option<(&[u8; 32], &str)>,
     deadline: Instant,
-    finishing: &mut bool,
+    finishing: &AtomicBool,
 ) -> Result<Paired, Failure> {
     let (reply, certificate) = loop {
         let unverified = HostClient::new(host, port, None, None, remaining(deadline)?);
@@ -109,8 +124,8 @@ async fn exchange(
     if info.bootstrap_version != BOOTSTRAP_VERSION {
         return Err(Failure::Public(FAILED));
     }
-    // ! Not trusted until the exchange authenticates it. The next two requests
-    //   have to see this same pin.
+    // ! Not trusted until the exchange authenticates it. The next two requests have to see this
+    // ! same pin.
     let pin: [u8; 32] = Sha256::digest(&certificate).into();
     let (pending, request) = ClientExchange::start(code.as_bytes(), &certificate, &nonce)
         .map_err(|_| Failure::Public(FAILED))?;
@@ -126,8 +141,8 @@ async fn exchange(
     let start = json_body(&PairStartRequest {
         request: lower_hex(&request),
     })?;
-    // ! Retrying is safe here: a busy start never reached the code, so it didn't
-    //   use up a guess. Finish is never repeated.
+    // ! Retrying is safe here: a busy start never reached the code, so it didn't use up a guess.
+    // ! Finish is never repeated.
     let reply = loop {
         let reply = pinned(deadline)?
             .request(Method::POST, PAIR_START_PATH, Some(start.clone()))
@@ -145,8 +160,8 @@ async fn exchange(
         return Err(Failure::Public(FAILED));
     }
     remaining(deadline)?;
-    // ? The memory-hard finish runs off the async thread. It's short and bounded,
-    //   and a late result is thrown away below before anything is sent.
+    // ? The memory-hard finish runs off the async thread. Nothing checks the pairing deadline after
+    // ? it: the finish request gets its own FINISH_DEADLINE instead.
     let confirmation = tokio::task::spawn_blocking(move || pending.finish(&response))
         .await
         .map_err(|_| Failure::Public(FAILED))?
@@ -158,16 +173,16 @@ async fn exchange(
             .filter(|(previous_pin, _)| **previous_pin == pin)
             .map(|(_, token)| token.to_owned()),
     })?;
-    let client = pinned(deadline)?;
-    *finishing = true;
+    let client = pinned(Instant::now() + FINISH_DEADLINE)?;
+    finishing.store(true, Ordering::SeqCst);
     let reply = client
         .request(Method::POST, PAIR_FINISH_PATH, Some(finish))
         .await
         .map_err(Failure::Host)?;
     let finished: PairFinishReply =
         step_reply(&reply, &["host_id", "token", "computer_name"], true)?;
-    // * Once finish answers, the PC has saved this device, so a late answer is
-    //   still kept.
+    // ! A finish reply lost to a timeout leaves the PC with a credential this device never got.
+    // ! Finish gets its own deadline so that is rare.
     let host_id = canonical_uuid(&finished.host_id).ok_or(Failure::Public(FAILED))?;
     let token = normalize_token(&finished.token)
         .ok()
@@ -205,6 +220,10 @@ fn step_reply<T: serde::de::DeserializeOwned>(
 ) -> Result<T, Failure> {
     if reply.status == 403 && !finish {
         return Err(Failure::Public(CODE_EXPIRED));
+    }
+    // * Only the finish route answers 409, and only for a full PC.
+    if reply.status == 409 && finish {
+        return Err(Failure::Public(DEVICE_LIMIT));
     }
     bootstrap_reply(reply, fields)
 }

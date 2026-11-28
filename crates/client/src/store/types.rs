@@ -1,12 +1,14 @@
 use crate::platform::Platform;
+use myrig_protocol::api::PcSettings;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     net::Ipv4Addr,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 /// One process's handle on a settings directory. A lock on the directory keeps
 /// writers in other processes out, and each write starts from disk.
@@ -14,6 +16,9 @@ pub struct Store {
     pub(super) directory: PathBuf,
     pub(super) platform: Arc<dyn Platform>,
     pub(super) pcs: Mutex<Vec<PcConfig>>,
+    /// Counts changes to `pcs` made by this store's own saves, so a read that
+    /// started before one doesn't replace it with an older answer.
+    pub(super) saves: AtomicU64,
 }
 
 /// The paired host's identity and this client's credential for it.
@@ -43,6 +48,19 @@ pub struct PcConfig {
     pub port: u16,
     pub mac: String,
     pub authentication: Authentication,
+}
+
+/// The fields the UI shows and edits; the credential isn't one of them.
+impl From<&PcConfig> for PcSettings {
+    fn from(pc: &PcConfig) -> Self {
+        Self {
+            id: pc.id.to_string(),
+            name: pc.name.clone(),
+            host: pc.host.to_string(),
+            port: pc.port,
+            mac: pc.mac.clone(),
+        }
+    }
 }
 
 /// A new PC as the user entered it. The port has a default if it's left out.
@@ -89,4 +107,11 @@ pub(super) struct StoredAuthentication {
     pub(super) host_id: String,
     pub(super) token: String,
     pub(super) tls_pin: String,
+}
+
+/// Wipes the token copy that encoding and decoding make.
+impl Drop for StoredAuthentication {
+    fn drop(&mut self) {
+        self.token.zeroize();
+    }
 }

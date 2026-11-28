@@ -19,7 +19,15 @@ pub trait Platform: Send + Sync + 'static {
     fn neighbor_macs(&self, host: Ipv4Addr) -> io::Result<Vec<String>>;
     /// This device's hostname, if it has one.
     fn hostname(&self) -> Option<String>;
+    /// Stops the terminal echoing what's typed until the guard is dropped. `None`
+    /// when input isn't a terminal or echo can't be changed.
+    fn hide_input(&self) -> Option<Box<dyn InputEcho>>;
 }
+
+/// Restores the terminal's echo when dropped.
+pub trait InputEcho {}
+
+impl InputEcho for () {}
 
 /// An open settings directory holding `pcs.json`. A lock lasts until the value
 /// is dropped.

@@ -41,6 +41,9 @@ pub(super) fn registry_host(first_token_byte: u8) -> Host {
         fn schedule_shutdown(&self) -> Result<(), crate::shutdown::PowerError> {
             panic!("local registry operations must not call power")
         }
+        fn cancel_shutdown(&self) -> Result<(), crate::shutdown::PowerError> {
+            panic!("local registry operations must not call power")
+        }
     }
     let digest = |byte: u8| -> String {
         Sha256::digest([byte; 32])
@@ -79,7 +82,7 @@ pub(super) async fn pair_device(
         "12345678",
         [7; 32],
         b"cert",
-        [index; 32],
+        &[index; 32],
         device(index.into()),
         Arc::new(|_| Ok(())),
     )

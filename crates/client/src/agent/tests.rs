@@ -11,6 +11,7 @@ use tokio::{
 
 struct Agent {
     _directory: TempDir,
+    store: std::path::PathBuf,
     input: Option<DuplexStream>,
     output: Lines<BufReader<DuplexStream>>,
     task: JoinHandle<()>,
@@ -24,6 +25,7 @@ impl Agent {
         let (input, agent_input) = duplex(64 * 1024);
         let (agent_output, output) = duplex(64 * 1024);
         let store = directory.path().join("settings");
+        let saved_in = store.clone();
         let task = tokio::spawn(async move {
             serve(
                 crate::platform::fixtures::platform(),
@@ -36,6 +38,7 @@ impl Agent {
         });
         Self {
             _directory: directory,
+            store: saved_in,
             input: Some(input),
             output: BufReader::new(output).lines(),
             task,
@@ -243,5 +246,126 @@ async fn the_frontend_says_when_a_view_is_on_screen() {
     assert_eq!(
         agent.call("set_attention", json!({"visible":"yes"})).await["error"],
         "Something went wrong. Try again."
+    );
+}
+
+/// A save waiting for another process's store lock must not hold up the agent's
+/// other requests.
+#[tokio::test]
+async fn a_store_lock_held_elsewhere_does_not_stall_other_requests() {
+    use crate::{
+        platform::fixtures::{lock_held_elsewhere, platform},
+        store::Store,
+        testing::{authentication, input},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    for method in ["update_pc", "delete_pc"] {
+        let mut agent = Agent::start();
+        let pc = Store::open(&agent.store, platform())
+            .unwrap()
+            .add(input("PC"), authentication())
+            .unwrap();
+        let id = pc.id.to_string();
+        let held = lock_held_elsewhere(&agent.store);
+        let released = Arc::new(AtomicBool::new(false));
+        let release = {
+            let released = released.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(1));
+                released.store(true, Ordering::SeqCst);
+                drop(held);
+            })
+        };
+        let params = json!({"identifier":id,"changes":{"name":"Renamed"}});
+        agent
+            .send(&json!({"id":900,"method":method,"params":params}).to_string())
+            .await;
+        let reply = agent.call("set_attention", json!({"visible":true})).await;
+        assert_eq!(reply["result"], Value::Null, "{method}: {reply}");
+        assert!(
+            !released.load(Ordering::SeqCst),
+            "{method} blocked the runtime until the lock was released"
+        );
+        release.join().unwrap();
+        let saved = agent.reply().await;
+        assert_eq!(saved["id"], json!(900), "{saved}");
+        assert!(saved.get("result").is_some(), "{method}: {saved}");
+    }
+}
+
+mod drain {
+    use crate::agent::{
+        consts::{CREDENTIAL_DRAIN, DRAIN_TIMEOUT},
+        utils::drain,
+    };
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    };
+    use tokio::{task::JoinSet, time::sleep};
+
+    /// Whether a request that ends after `length` finished before the drain
+    /// gave up.
+    async fn finishes(length: Duration, holding: bool) -> bool {
+        let done = Arc::new(AtomicBool::new(false));
+        let mut requests = JoinSet::new();
+        let flag = done.clone();
+        requests.spawn(async move {
+            sleep(length).await;
+            flag.store(true, Ordering::SeqCst);
+        });
+        drain(&mut requests, || holding).await;
+        done.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ordinary_requests_get_the_drain_timeout() {
+        let second = Duration::from_secs(1);
+        assert!(finishes(DRAIN_TIMEOUT - second, false).await);
+        assert!(!finishes(DRAIN_TIMEOUT + second, false).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pairing_holding_a_credential_gets_time_to_store_or_revoke_it() {
+        let second = Duration::from_secs(1);
+        let limit = DRAIN_TIMEOUT + CREDENTIAL_DRAIN;
+        assert!(finishes(limit - second, true).await);
+        assert!(!finishes(limit + second, true).await);
+    }
+}
+
+/// Fails every read, like a broken pipe on stdin.
+struct BrokenInput;
+
+impl tokio::io::AsyncRead for BrokenInput {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        _: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()))
+    }
+}
+
+#[tokio::test]
+async fn a_stdin_read_error_ends_the_session_with_an_error() {
+    let directory = TempDir::new().unwrap();
+    let (output, _reader) = duplex(64 * 1024);
+    let result = serve(
+        crate::platform::fixtures::platform(),
+        &directory.path().join("settings"),
+        BufReader::new(BrokenInput),
+        output,
+    )
+    .await;
+    assert_eq!(
+        result.unwrap_err().0,
+        "Cannot read requests from the plugin."
     );
 }

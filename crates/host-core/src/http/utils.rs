@@ -8,8 +8,9 @@ use hyper::{
     body::{Bytes, Incoming},
     header::{HeaderMap, HeaderValue},
 };
+use myrig_protocol::checked_json::CheckedJson;
 use myrig_protocol::lan::{PROTOCOL_MAJOR, PROTOCOL_MINOR, ProtocolVersion, Versioned};
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use tokio::time::timeout;
 
@@ -61,6 +62,14 @@ pub(super) fn pairing_unavailable() -> Reply {
         "Pairing is unavailable.",
     )
 }
+/// Every device slot is taken; the owner has to remove one before this device can pair.
+pub(super) fn device_limit() -> Reply {
+    error(
+        StatusCode::CONFLICT,
+        "device_limit_reached",
+        "Device limit reached.",
+    )
+}
 /// Another request is holding the code for a moment; the device can ask again.
 pub(super) fn pairing_busy() -> Reply {
     error(
@@ -87,8 +96,7 @@ pub(super) fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> 
 }
 
 pub(super) fn accepts_json(headers: &HeaderMap) -> bool {
-    // ? The more specific type wins, so application/json;q=0 overrides a
-    //   wildcard.
+    // ? The more specific type wins, so application/json;q=0 overrides a wildcard.
     let mut best: Option<(u8, f32)> = None;
     for header in headers.get_all("accept") {
         let Ok(header) = header.to_str() else {
@@ -152,4 +160,16 @@ pub(super) fn json_media(headers: &HeaderMap) -> bool {
             }),
         _ => false,
     }
+}
+
+/// The body as JSON, refusing duplicate object keys at any depth.
+pub(super) fn checked_value(bytes: &[u8]) -> Option<Value> {
+    serde_json::from_slice::<CheckedJson>(bytes)
+        .ok()
+        .map(|CheckedJson(value)| value)
+}
+
+/// The body as a `T`. Duplicate keys are refused before `T` sees the value.
+pub(super) fn parse_checked<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
+    serde_json::from_value(checked_value(bytes)?).ok()
 }

@@ -1,5 +1,5 @@
 use super::{
-    consts::FAILURE,
+    consts::{DATA_FAILURE, FAILURE},
     native,
     types::{InstallDirectory, PathRole},
     utils::{check_path, check_security},
@@ -41,6 +41,20 @@ impl InstallDirectory {
                 Err(_) => return Err(FAILURE),
             }
         }
+        Self::check_contents(path)
+    }
+
+    /// Checks a data folder the installer is about to adopt: it must be owned by
+    /// SYSTEM, Administrators or the service, nobody else may write to it, and so
+    /// on for everything inside it. A folder a standard user created fails here
+    /// even if it carries the right marker file.
+    pub fn validate_data_folder(path: &Path) -> Result<(), &'static str> {
+        Self::data_folder_check(path).map_err(|_| DATA_FAILURE)
+    }
+
+    fn data_folder_check(path: &Path) -> Result<(), &'static str> {
+        check_path(path)?;
+        check_security(&native::read(path)?, PathRole::Destination)?;
         Self::check_contents(path)
     }
 

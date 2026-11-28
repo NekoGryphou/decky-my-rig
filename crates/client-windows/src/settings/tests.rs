@@ -188,18 +188,66 @@ fn set_dacl(path: &Path, sddl: &str) {
 }
 
 #[test]
-fn a_wider_document_acl_is_narrowed_on_the_next_read() {
+fn a_wider_document_acl_is_refused_and_left_for_the_user_to_fix() {
     let fixture = fixture();
     fixture.store.add(input("PC"), authentication()).unwrap();
     let user = &current_owners().unwrap()[0];
     // - Users (BU) can read it, as if the file had been copied in from somewhere
     //   else.
-    set_dacl(&fixture.file(), &format!("D:(A;;FR;;;BU)(A;;FA;;;{user})"));
-    fixture.open(&fixture.directory).unwrap();
+    let wider = format!("D:(A;;FR;;;BU)(A;;FA;;;{user})");
+    set_dacl(&fixture.file(), &wider);
+    let before = dacl(&fixture.file());
+    let error = fixture
+        .store
+        .add(input("Two"), authentication())
+        .unwrap_err();
+    assert_eq!(error.0, "PC configuration is not private to this user.");
+    // - A read never writes an ACL.
+    assert_eq!(dacl(&fixture.file()), before);
+}
+
+#[test]
+fn reading_never_changes_the_document_acl() {
+    let fixture = fixture();
+    fixture.store.add(input("PC"), authentication()).unwrap();
+    let user = &current_owners().unwrap()[0];
+    // - Private to this user, but not the exact ACL a save writes.
+    set_dacl(&fixture.file(), &format!("D:P(A;;FR;;;{user})"));
+    let before = dacl(&fixture.file());
+    let other = fixture.open(&fixture.directory).unwrap();
+    assert_eq!(other.configs().len(), 1);
+    assert_eq!(dacl(&fixture.file()), before);
+}
+
+#[test]
+fn a_save_gives_the_document_a_private_acl_again() {
+    let fixture = fixture();
+    fixture.store.add(input("PC"), authentication()).unwrap();
+    let user = &current_owners().unwrap()[0];
+    set_dacl(&fixture.file(), &format!("D:P(A;;FR;;;{user})"));
+    fixture.store.add(input("Two"), authentication()).unwrap();
     assert_eq!(
         dacl(&fixture.file()),
         canonical(&format!("D:PAI(A;;FA;;;{user})"))
     );
+}
+
+#[test]
+fn a_wider_folder_acl_is_refused_when_the_folder_is_opened_again() {
+    let fixture = fixture();
+    let user = &current_owners().unwrap()[0];
+    set_dacl(
+        &fixture.directory,
+        &format!("D:(A;OICI;FR;;;BU)(A;OICI;FA;;;{user})"),
+    );
+    let before = dacl(&fixture.directory);
+    let error = fixture
+        .store
+        .add(input("PC"), authentication())
+        .unwrap_err();
+    assert_eq!(error.0, "PC configuration is not private to this user.");
+    // - Checking never writes the ACL.
+    assert_eq!(dacl(&fixture.directory), before);
 }
 
 #[test]

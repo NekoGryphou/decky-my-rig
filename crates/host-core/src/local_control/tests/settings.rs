@@ -111,10 +111,10 @@ fn status_fixture_reports_live_management_state_without_secrets() {
         &host,
         include_str!("../../../../../tests/fixtures/local-control/status-request.json").as_bytes(),
     );
-    let expected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../tests/fixtures/local-control/status-reply.json"
-    ))
-    .unwrap();
+    // ? The fixture holds the placeholder version; the service reports the real one.
+    let fixture = include_str!("../../../../../tests/fixtures/local-control/status-reply.json")
+        .replace("\"service_version\":\"0.0.0\"", &format!("\"service_version\":\"{}\"", env!("CARGO_PKG_VERSION")));
+    let expected: serde_json::Value = serde_json::from_str(&fixture).unwrap();
     assert_eq!(response, expected);
     assert!(response.get("paired_devices").is_none());
 }

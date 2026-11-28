@@ -20,11 +20,11 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(
     bytes: &[u8],
     limit: usize,
 ) -> io::Result<()> {
+    // ! A limit above u32::MAX must not silently truncate the length prefix.
+    let length = u32::try_from(bytes.len()).map_err(|_| ErrorKind::InvalidInput)?;
     if bytes.is_empty() || bytes.len() > limit {
         return Err(ErrorKind::InvalidInput.into());
     }
-    writer
-        .write_all(&(bytes.len() as u32).to_le_bytes())
-        .await?;
+    writer.write_all(&length.to_le_bytes()).await?;
     writer.write_all(bytes).await
 }

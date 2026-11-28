@@ -267,6 +267,7 @@ pub(super) fn deterministic_zip(
 /// Writes the `bin/` files of `payload` into `out` without the prefix. That's
 /// the folder Decky's store build copies to the plugin's `bin/`.
 pub(super) fn write_bin(out: &Path, payload: &BTreeMap<String, Vec<u8>>) -> Result<(), String> {
+    std::fs::create_dir_all(out).map_err(|error| format!("{}: {error}", out.display()))?;
     for (relative, data) in payload {
         let name = relative
             .strip_prefix("bin/")

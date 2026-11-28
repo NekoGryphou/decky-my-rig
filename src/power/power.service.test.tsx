@@ -13,6 +13,7 @@ vi.mock(
 );
 
 import { mocks } from "../shared/decky.fixtures";
+import { RECONNECT_MS, WATCH_STALL_MS } from "./power.consts";
 import { PowerService } from "./power.service";
 
 interface Request {
@@ -74,6 +75,14 @@ describe("plugin-scope power state", () => {
     expect(toast.dismiss).toHaveBeenCalledTimes(1);
     await publish(frame(4, "authentication"));
     expect(mocks.toast).toHaveBeenCalledTimes(2);
+  });
+
+  it("dismisses issue toasts when the agent closes", async () => {
+    service.start();
+    await publish(frame(1, "authentication"));
+    const toast = mocks.toast.mock.results[0]?.value;
+    await publish({ ...frame(2), closed: true });
+    expect(toast.dismiss).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a stale Stop action after a new authentication issue", async () => {
@@ -141,6 +150,46 @@ describe("plugin-scope power state", () => {
     expect(service.getSnapshot().pcs[0]?.name).toBe("Gaming PC");
   });
 
+  it("subscribes again when a subscription never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      service.start();
+      expect(mocks.watch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(WATCH_STALL_MS + RECONNECT_MS);
+      expect(mocks.watch).toHaveBeenCalledTimes(2);
+      requests[requests.length - 1]?.resolve(frame(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(service.getSnapshot().pcs[0]?.name).toBe("Gaming PC");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores the answer of an abandoned subscription", async () => {
+    vi.useFakeTimers();
+    service.start();
+    await publish(frame(1));
+    const orphan = requests.shift();
+    await vi.advanceTimersByTimeAsync(WATCH_STALL_MS + RECONNECT_MS);
+    expect(mocks.watch).toHaveBeenCalledTimes(3);
+    // - The backend ends the abandoned watch later with a frame of its own.
+    orphan?.resolve(frame(9, "authentication"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(service.getSnapshot().pcs[0]?.issue).toBeUndefined();
+    expect(mocks.watch).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not republish the frame it already shows", async () => {
+    service.start();
+    await publish(frame(1));
+    const before = service.getSnapshot();
+    // - The backend ends a long wait with the revision the caller has.
+    await publish(frame(1));
+    expect(service.getSnapshot()).toBe(before);
+    expect(mocks.watch).toHaveBeenCalledTimes(3);
+  });
+
   it("ignores a late subscription from a disposed plugin lifetime", async () => {
     service.start();
     service.stop();
@@ -157,7 +206,7 @@ describe("plugin-scope power state", () => {
     service.start();
     await publish(frame(1));
     requests.shift()?.reject(new Error("private backend detail"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(service.getSnapshot().available).toBe(false);
     expect(service.getSnapshot().error).not.toContain("private backend detail");
     await vi.advanceTimersByTimeAsync(2000);
@@ -165,7 +214,7 @@ describe("plugin-scope power state", () => {
     expect(service.getSnapshot().error).toBe("");
     expect(service.getSnapshot().available).toBe(true);
     requests.shift()?.reject(new Error("disconnected"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     service.stop();
     const calls = mocks.watch.mock.calls.length;
     await vi.advanceTimersByTimeAsync(20_000);

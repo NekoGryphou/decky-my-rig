@@ -36,8 +36,7 @@ pub(super) fn build_request(
         .header("x-myrig-protocol-major", PROTOCOL_MAJOR.to_string())
         .header(CONNECTION, "close");
     if let Some(token) = token {
-        // * We can't wipe hyper's copy of the header, since hyper owns those
-        //   bytes.
+        // * We can't wipe hyper's copy of the header, since hyper owns those bytes.
         let text = Zeroizing::new(format!("Bearer {token}"));
         let mut value = HeaderValue::from_str(&text).map_err(|_| HostError::Invalid)?;
         value.set_sensitive(true);

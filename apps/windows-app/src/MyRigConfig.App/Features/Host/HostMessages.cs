@@ -32,12 +32,9 @@ internal static class HostMessages
     public const string SignOutTitle = "Ask an administrator to add you to My Rig Managers, then sign out and back in";
     public const string ListenerUnavailable = "Can't open the PC connection port";
     public const string TestModeTitle = "Test mode";
+    public const string PairFailed = "The device couldn't be paired.";
     public const string PortNotChanged = "The port couldn't be changed.";
     public const string TestModeChangeFailed = "Test mode couldn't be changed.";
-
-    public const string TestModeDescription = "Stop requests from a device show a notification instead of shutting down this PC.";
-    public const string RemoveMessage = "This device will no longer start or stop this PC. Pair it again to use it.";
-    public const string TestModeMessage = "Shutdown requests from a device leave this PC on.";
 
     public const string StartFailed = "The service didn't start.";
     public const string RestartFailed = "The service didn't restart.";

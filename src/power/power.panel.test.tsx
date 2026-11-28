@@ -1,5 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // noinspection TypeScriptUnresolvedReference
@@ -43,9 +49,11 @@ describe("PowerPanel", () => {
   it("tells the agent while it is on screen", async () => {
     await emitPowerSnapshot([]);
     const { unmount } = render(<PowerPanel />);
-    expect(mocks.attention).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(mocks.attention).toHaveBeenLastCalledWith(true));
     unmount();
-    expect(mocks.attention).toHaveBeenLastCalledWith(false);
+    await waitFor(() =>
+      expect(mocks.attention).toHaveBeenLastCalledWith(false),
+    );
   });
 
   it("offers Add PC in an empty QAM beside the header settings button", async () => {
@@ -164,6 +172,19 @@ describe("PowerPanel", () => {
     expect(
       screen.getByRole("button", { name: "Stopping Office PC" }),
     ).toBeDisabled();
+  });
+
+  it("opens one Stop confirmation for a repeated press", async () => {
+    // ! A second press while the question is open must not stack a second one, or two confirmations
+    // ! stay on screen after one is answered.
+    await emitPowerSnapshot([{ id: "a", name: "Office PC", state: "online" }]);
+    render(<PowerPanel />);
+    const stop = screen.getByRole("button", { name: "Stop Office PC" });
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    expect(mocks.modal).toHaveBeenCalledTimes(1);
+    // ? Rendering the question lets cleanup close it, as it does on screen.
+    renderLastModal();
   });
 
   it("does not send Stop when its confirmation is canceled", async () => {

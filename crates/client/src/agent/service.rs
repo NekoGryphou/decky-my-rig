@@ -1,8 +1,8 @@
 use super::{
-    consts::{DRAIN_TIMEOUT, MAX_LINE},
-    messages::OPERATION_FAILED,
+    consts::MAX_LINE,
+    messages::{INPUT_FAILED, OPERATION_FAILED},
     types::{Agent, Request},
-    utils::{changes, next_line, optional_text, poll_interval, port, text},
+    utils::{changes, drain, next_line, optional_text, poll_interval, port, text},
 };
 use crate::{
     drafts::Drafts,
@@ -25,8 +25,14 @@ use tokio::{
     io::{AsyncBufRead, AsyncWrite, AsyncWriteExt},
     sync::{Notify, mpsc},
     task::JoinSet,
-    time::{sleep, timeout},
+    time::sleep,
 };
+
+/// Lines waiting for stdout; a stalled reader holds senders back instead of
+/// growing memory.
+const OUTPUT_QUEUE: usize = 64;
+/// Requests running at once; more input waits until one finishes.
+const MAX_REQUESTS: usize = 32;
 
 /// Serves one plugin session over `input`/`output` until `input` ends.
 pub async fn serve<R, W>(
@@ -47,7 +53,7 @@ where
         changed: Notify::new(),
         attended: AtomicBool::new(false),
     });
-    let (lines, receiver) = mpsc::unbounded_channel::<String>();
+    let (lines, receiver) = mpsc::channel::<String>(OUTPUT_QUEUE);
     let writer = tokio::spawn(write_lines(receiver, output));
     agent.controller.publish(false);
     let mut background = JoinSet::new();
@@ -56,9 +62,21 @@ where
     let mut requests = JoinSet::new();
     let mut input = input;
     let mut line = Vec::new();
-    while let Ok(Some(within)) = next_line(&mut input, &mut line, MAX_LINE).await {
+    let mut read_error = false;
+    loop {
+        let within = match next_line(&mut input, &mut line, MAX_LINE).await {
+            Ok(Some(within)) => within,
+            Ok(None) => break,
+            Err(_) => {
+                read_error = true;
+                break;
+            }
+        };
         // - Clean up finished requests as we go instead of at the end.
         while requests.try_join_next().is_some() {}
+        while requests.len() >= MAX_REQUESTS {
+            requests.join_next().await;
+        }
         let request = std::str::from_utf8(&line)
             .ok()
             .filter(|_| within)
@@ -72,23 +90,19 @@ where
                 },
                 None => json!({"id":null,"error":OPERATION_FAILED}),
             };
-            let _ = lines.send(reply.to_string());
+            let _ = lines.send(reply.to_string()).await;
         });
     }
-    // * Let requests that are still running (like a pairing) finish, up to a
-    //   limit.
-    let drained = timeout(DRAIN_TIMEOUT, async {
-        while requests.join_next().await.is_some() {}
-    })
-    .await;
-    if drained.is_err() {
-        requests.shutdown().await;
-    }
+    // * Let requests that are still running (like a pairing) finish, up to a limit.
+    drain(&mut requests, || agent.drafts.holds_credential()).await;
     background.shutdown().await;
-    agent.drafts.close();
+    agent.drafts.close().await;
     agent.controller.close();
     drop(lines);
     let _ = writer.await;
+    if read_error {
+        return Err(PublicError(INPUT_FAILED));
+    }
     Ok(())
 }
 
@@ -134,21 +148,23 @@ async fn dispatch(agent: &Agent, method: &str, params: &Value) -> Result<Value, 
             agent.drafts.cancel(text(params, "draft_id")?).await?;
             Value::Null
         }
-        "save_pairing" => changed(agent, || {
-            agent
+        "save_pairing" => {
+            let result = agent
                 .drafts
                 .save(
                     text(params, "draft_id")?,
                     text(params, "name")?,
                     text(params, "mac")?,
                 )
-                .map(|saved| json!(saved))
-        })?,
-        "update_pc" => changed(agent, || {
-            controller
+                .await;
+            changed(agent, || result.map(|saved| json!(saved)))?
+        }
+        "update_pc" => {
+            let result = controller
                 .update_pc(text(params, "identifier")?, changes(params)?)
-                .map(|saved| json!(saved))
-        })?,
+                .await;
+            changed(agent, || result.map(|saved| json!(saved)))?
+        }
         "delete_pc" => {
             let result = controller.delete_pc(text(params, "identifier")?).await;
             changed(agent, || result.map(|deleted| json!(deleted)))?
@@ -198,12 +214,13 @@ async fn poll(agent: Arc<Agent>) {
     }
 }
 
-async fn push_snapshots(agent: Arc<Agent>, lines: mpsc::UnboundedSender<String>) {
+async fn push_snapshots(agent: Arc<Agent>, lines: mpsc::Sender<String>) {
     let mut after = -1;
     while let Ok(frame) = agent.controller.snapshots().watch(after).await {
         after = i64::try_from(frame.revision).unwrap_or(i64::MAX);
         if lines
             .send(json!({"event":"snapshot","frame":frame}).to_string())
+            .await
             .is_err()
             || frame.closed
         {
@@ -212,10 +229,7 @@ async fn push_snapshots(agent: Arc<Agent>, lines: mpsc::UnboundedSender<String>)
     }
 }
 
-async fn write_lines<W: AsyncWrite + Unpin>(
-    mut lines: mpsc::UnboundedReceiver<String>,
-    mut output: W,
-) {
+async fn write_lines<W: AsyncWrite + Unpin>(mut lines: mpsc::Receiver<String>, mut output: W) {
     while let Some(line) = lines.recv().await {
         let written = async {
             output.write_all(line.as_bytes()).await?;

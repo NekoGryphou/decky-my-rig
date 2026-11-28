@@ -7,12 +7,13 @@ use super::{
 use crate::shared::consts::FAILURE;
 use std::sync::Arc;
 use tokio::sync::{Semaphore, watch};
+use zeroize::Zeroizing;
 
 impl Worker {
-    pub(super) async fn finish(mut self) -> Result<Vec<u8>, &'static str> {
+    pub(super) async fn finish(mut self) -> Result<Zeroizing<Vec<u8>>, &'static str> {
         let result = (&mut self.response).await.map_err(|_| FAILURE)?;
-        // ? The thread has sent its reply and is ending. Joining it off the
-        //   runtime thread keeps the pipe's other connections running.
+        // ? The thread has sent its reply and is ending. Joining it off the runtime thread keeps
+        // ? the pipe's other connections running.
         let thread = self.thread.take().ok_or(FAILURE)?;
         tokio::task::spawn_blocking(move || thread.join())
             .await
@@ -23,8 +24,8 @@ impl Worker {
 }
 impl Drop for Worker {
     fn drop(&mut self) {
-        // ! Canceling can't detach a change in progress or leave an impersonating
-        //   OS thread running. The callback has to finish its own transaction.
+        // ! Canceling can't detach a change in progress or leave an impersonating OS thread
+        // ! running. The callback has to finish its own transaction.
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -36,18 +37,21 @@ impl ControlPipe {
     /// limits. On stop, running callbacks finish before the service reports
     /// it's done. Capture may only copy trusted cancellation data, and the
     /// caller is always authorized before the callback runs.
-    pub async fn serve<F, Capture, Context>(
+    pub async fn serve<F, Reply, Capture, Context>(
         mut self,
         callback: F,
         capture: Capture,
         mut stop: watch::Receiver<bool>,
     ) -> Result<(), &'static str>
     where
-        F: Fn(&[u8], Context) -> Vec<u8> + Send + Sync + 'static,
+        F: Fn(&[u8], Context) -> Reply + Send + Sync + 'static,
+        Reply: Into<Zeroizing<Vec<u8>>>,
         Capture: Fn() -> Context + Send + Sync + 'static,
         Context: Send + 'static,
     {
-        let callback: ControlCallback<Context> = Arc::new(callback);
+        // ! Replies can carry a pairing code, so they are wiped once written.
+        let callback: ControlCallback<Context> =
+            Arc::new(move |request, context| callback(request, context).into());
         let capacity = Arc::new(Capacity {
             normal: Arc::new(Semaphore::new(NORMAL_SLOTS)),
             events: Arc::new(Semaphore::new(EVENT_SLOTS)),
@@ -67,16 +71,21 @@ impl ControlPipe {
                     Ok::<_, std::io::Error>(reader)
                 }, if active.len() < MAX_ACTIVE => match connected {
                     Ok(reader) => {
-                        // ! Take the snapshot before publishing the next
-                        //   instance, so a newer worker can't get ahead of this
-                        //   connection's cancellation state.
+                        // ! Take the snapshot before publishing the next instance, so a newer
+                        // ! worker can't get ahead of this connection's cancellation state.
                         let dispatch = Dispatch { callback: Arc::clone(&callback), context: capture() };
-                        let next = create_pipe(&self.name, &self.sddl, false)?;
+                        // ! Returning early here would drop the connection tasks while the callback
+                        // ! still needs this thread, so a failed instance ends the loop through the
+                        // ! drain below instead.
+                        let next = match create_pipe(&self.name, &self.sddl, false) {
+                            Ok(next) => next,
+                            Err(_) => { failure = Some(FAILURE); break; }
+                        };
                         let pipe = std::mem::replace(&mut self.pipe, next);
                         let future = serve_connection(
                             pipe,
                             dispatch,
-                            Arc::clone(&self.allowed_sids),
+                            Arc::clone(&self.allowed),
                             stop.clone(),
                             Arc::clone(&capacity),
                             reader,
@@ -84,7 +93,9 @@ impl ControlPipe {
                         );
                         active.spawn(future);
                     }
-                    Err(error) if peer_disconnected(&error) => self.renew()?,
+                    Err(error) if peer_disconnected(&error) => {
+                        if self.renew().is_err() { failure = Some(FAILURE); break; }
+                    }
                     Err(_) => { failure = Some(FAILURE); break; }
                 },
                 result = active.join_next(), if !active.is_empty() => {
@@ -112,10 +123,9 @@ impl ControlPipe {
     }
 
     fn renew(&mut self) -> Result<(), &'static str> {
-        // ! Don't reuse Tokio/Mio's buffered I/O across clients. Create the replacement
-        //   while the old instance still owns the pipe name, then close the old
-        //   connected instance without letting it listen again. The replacement stays
-        //   available while callbacks run.
+        // ! Don't reuse Tokio/Mio's buffered I/O across clients. Create the replacement while the
+        // ! old instance still owns the pipe name, then close the old connected instance without
+        // ! letting it listen again. The replacement stays available while callbacks run.
         let next = create_pipe(&self.name, &self.sddl, false)?;
         self.pipe = next;
         Ok(())

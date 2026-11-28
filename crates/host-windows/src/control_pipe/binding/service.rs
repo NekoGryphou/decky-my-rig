@@ -3,7 +3,7 @@ use super::super::{
         authorize, create_pipe, group_members, managers_sid, recorded_managers, service_sid_text,
         sid_words, well_known,
     },
-    types::ControlPipe,
+    types::{Allowed, ControlPipe, RecordedUser},
 };
 use super::utils::{control_pipe_sddl, manager_users};
 use crate::control_client::control_pipe_name;
@@ -24,20 +24,30 @@ impl ControlPipe {
             .chain(users.iter().cloned())
             .collect();
         let sddl = control_pipe_sddl(&service, &clients);
-        let mut allowed_sids = vec![
+        let always = vec![
             well_known(WinLocalSystemSid)?,
             well_known(WinBuiltinAdministratorsSid)?,
             managers_words,
         ];
-        // * An unreadable entry only costs that user access, not the whole
-        //   service.
-        allowed_sids.extend(users.iter().filter_map(|user| sid_words(user).ok()));
+        // * An unreadable entry only costs that user access, not the whole service.
+        let recorded_users = users
+            .iter()
+            .filter_map(|user| {
+                Some(RecordedUser {
+                    text: user.clone(),
+                    words: sid_words(user).ok()?,
+                })
+            })
+            .collect();
         let name = control_pipe_name();
         Ok(Self {
             pipe: create_pipe(&name, &sddl, true)?,
             name,
             sddl,
-            allowed_sids: Arc::new(allowed_sids),
+            allowed: Arc::new(Allowed {
+                always,
+                recorded_users,
+            }),
             authorize,
         })
     }

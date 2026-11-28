@@ -20,7 +20,7 @@ public partial class PairingViewModel : ObservableObject
     private Guid? approvalHost;
 
     private Guid? confirmedHost;
-    private PairingCodeLease? lease;
+    private PairingCodeLeaseService? lease;
     private IReadOnlySet<Guid> devicesBefore = new HashSet<Guid>();
     private string requestedName = "";
     private int ticks;
@@ -110,7 +110,7 @@ public partial class PairingViewModel : ObservableObject
             ErrorMessage = "";
             ClearCode();
             requestedName = DeviceName.Trim();
-            if (!LocalControlProtocol.IsValidName(requestedName))
+            if (!LocalControlProtocolService.IsValidName(requestedName))
             {
                 ErrorMessage = PairingMessages.InvalidName;
                 Step = PairingStep.Name;
@@ -148,8 +148,8 @@ public partial class PairingViewModel : ObservableObject
 
     private async Task<PairingOpenResult> OpenCodeAsync(Guid hostId, CancellationToken cancellationToken)
     {
-        // ! Assume an approval exists until the service says otherwise, so canceling after the
-        //   request went out still closes it.
+        // ! Assume an approval exists until the service says otherwise, so canceling after the request went out still
+        // ! closes it.
         var previousApproval = approvalHost;
         approvalHost = hostId;
         var result = await host.OpenPairingAsync(hostId, requestedName, cancellationToken);
@@ -176,7 +176,8 @@ public partial class PairingViewModel : ObservableObject
             {
                 linked.Token.ThrowIfCancellationRequested();
                 ClearCode();
-                approvalHost = null; // Successful pairing consumed this approval.
+                approvalHost = null; // - Successful pairing consumed this approval.
+                host.ApprovalConsumed();
                 host.ShowFeedback(PairingMessages.Paired(requestedName), MessageTone.Success);
                 Paired?.Invoke(this, EventArgs.Empty);
             }
@@ -192,8 +193,8 @@ public partial class PairingViewModel : ObservableObject
         OnPropertyChanged(nameof(CanCreate));
         ClearCode();
         lifetime.Cancel();
-        // ! Let the client exchange finish before sending close with its own deadline. The host
-        //   invalidates older approval callbacks, queued work included.
+        // ! Let the client exchange finish before sending close with its own deadline. The host invalidates older
+        // ! approval callbacks, queued work included.
         await operation.WaitAsync();
         try { await CancelApprovalAsync(); }
         finally
@@ -231,6 +232,8 @@ public partial class PairingViewModel : ObservableObject
         RemainingText = PairingMessages.ExpiresIn(remaining);
         return true;
     }
+
+    internal void FailUnexpectedly() => Fail(PairingMessages.CodeFailed);
 
     private void Fail(string message)
     {

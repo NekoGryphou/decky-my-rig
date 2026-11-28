@@ -6,8 +6,7 @@ use serde::{
 use serde_json::Value;
 use std::fmt;
 
-// * One recursive visitor rejects duplicate keys, even in objects we don't know
-//   about yet.
+// * One recursive visitor rejects duplicate keys, even in objects we don't know about yet.
 impl<'de> Deserialize<'de> for CheckedJson {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct CheckedVisitor;

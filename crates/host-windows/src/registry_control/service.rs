@@ -6,9 +6,17 @@ use myrig_host_core::{
     paired_devices::RegistryConfig,
     shutdown::{Core, Power},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use super::types::RegistryControl;
+
+/// Saves through the control while it lives. After it is gone nothing is saved.
+fn persist_through(control: &Weak<RegistryControl>, candidate: &[u8]) -> Result<(), PersistError> {
+    control
+        .upgrade()
+        .ok_or(PersistError::Unchanged)?
+        .persist(candidate)
+}
 
 impl RegistryControl {
     /// Built from one startup read of this protected store: power mode, port,
@@ -20,21 +28,15 @@ impl RegistryControl {
         power: Box<dyn Power>,
     ) -> Result<Arc<Self>, &'static str> {
         let computer_name = crate::shared::native::computer_name()?;
-        // ? The host saves through this control, so it holds a weak link to avoid
-        //   a cycle.
-        Ok(Arc::new_cyclic(|control: &std::sync::Weak<Self>| {
+        // ? The host saves through this control, so it holds a weak link to avoid a cycle.
+        Ok(Arc::new_cyclic(|control: &Weak<Self>| {
             let control = control.clone();
             Self {
                 host: Arc::new(Host::new(
                     config,
                     Core::new(power),
                     computer_name,
-                    Arc::new(move |candidate| {
-                        control
-                            .upgrade()
-                            .ok_or(PersistError::Unchanged)?
-                            .persist(candidate)
-                    }),
+                    Arc::new(move |candidate| persist_through(&control, candidate)),
                 )),
                 store,
                 baseline: Mutex::new(bytes),
@@ -55,7 +57,7 @@ impl RegistryControl {
     ) -> Result<zeroize::Zeroizing<String>, &'static str> {
         let (code, entropy, device_id) = myrig_host_core::pairing_entropy::generate()?;
         let code = zeroize::Zeroizing::new(code);
-        let mut entropy = zeroize::Zeroizing::new(entropy);
+        let entropy = zeroize::Zeroizing::new(entropy);
         let nonce = myrig_host_core::pairing_entropy::nonce()?;
         let control = Arc::downgrade(self);
         self.host
@@ -65,14 +67,9 @@ impl RegistryControl {
                 &code,
                 nonce,
                 identity.leaf_der(),
-                std::mem::take(&mut *entropy),
+                &entropy,
                 device_id,
-                Arc::new(move |candidate| {
-                    control
-                        .upgrade()
-                        .ok_or(PersistError::Unchanged)?
-                        .persist(candidate)
-                }),
+                Arc::new(move |candidate| persist_through(&control, candidate)),
             )
             .await
             .map_err(|_| "Pairing could not be opened.")?;
@@ -109,6 +106,21 @@ impl RegistryControl {
             host.require_storage_recovery();
         }
         result
+    }
+
+    /// Takes requests again if the saved file now matches memory, and keeps the
+    /// baseline at what is on disk so the next save compares against it.
+    pub fn restore_storage(&self) -> bool {
+        let Ok(saved) = self.store.read() else {
+            return false;
+        };
+        if !self.host.restore_storage(&saved) {
+            return false;
+        }
+        if let Ok(mut baseline) = self.baseline.lock() {
+            *baseline = saved;
+        }
+        true
     }
 
     fn persist(&self, candidate: &[u8]) -> Result<(), PersistError> {

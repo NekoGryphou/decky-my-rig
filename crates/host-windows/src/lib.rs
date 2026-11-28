@@ -5,8 +5,8 @@
 pub mod control_client;
 #[cfg(all(windows, feature = "service"))]
 pub mod control_pipe;
-#[cfg(all(windows, feature = "service"))]
-mod event_log;
+#[cfg(windows)]
+pub mod event_log;
 #[cfg(all(windows, feature = "service"))]
 pub mod host_service;
 #[cfg(all(windows, feature = "service"))]

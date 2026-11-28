@@ -2,13 +2,18 @@
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "B", "ASYNC", "S", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "main.py" = ["E402"]
+# - Tests assert (also to narrow types for mypy) and run fixed argument lists
+#   of tools they need (openssl, cargo), never input from outside.
+"tests/**" = ["S101", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.11"
+# - The plugin tests import their helpers as top-level modules, as unittest does.
+mypy_path = ["tests/plugin"]
 
 [[tool.mypy.overrides]]
 module = "decky"

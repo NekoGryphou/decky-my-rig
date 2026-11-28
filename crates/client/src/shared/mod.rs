@@ -6,6 +6,7 @@ mod utils;
 pub use errors::PublicError;
 pub use utils::{
     normalize_host, normalize_mac, normalize_name, normalize_port, normalize_token, normalize_uuid,
+    read_bounded,
 };
 
 #[cfg(test)]

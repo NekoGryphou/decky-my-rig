@@ -1,6 +1,6 @@
 use super::super::{
     native::{create_pipe, sid_text, well_known},
-    types::{Authorize, ControlPipe},
+    types::{Allowed, Authorize, ControlPipe},
 };
 use crate::control_client::connect_client;
 use myrig_protocol::local_control::RESPONSE_LIMIT;
@@ -85,10 +85,13 @@ pub(super) fn fixture(authorize: Authorize) -> (String, ControlPipe) {
         pipe: create_pipe(&name, &sddl, true).unwrap(),
         name: name.clone(),
         sddl,
-        allowed_sids: Arc::new(vec![
-            well_known(WinLocalSystemSid).unwrap(),
-            well_known(WinBuiltinAdministratorsSid).unwrap(),
-        ]),
+        allowed: Arc::new(Allowed {
+            always: vec![
+                well_known(WinLocalSystemSid).unwrap(),
+                well_known(WinBuiltinAdministratorsSid).unwrap(),
+            ],
+            recorded_users: Vec::new(),
+        }),
         authorize,
     };
     (name, pipe)

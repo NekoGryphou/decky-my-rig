@@ -8,8 +8,9 @@ use opaque_ke::{
     ClientRegistration, ClientRegistrationFinishParameters, CredentialRequest, ServerLogin,
     ServerLoginParameters, ServerRegistration, ServerSetup,
 };
-use rand::{RngCore, rngs::OsRng};
+use rand::{Rng, rand_core::UnwrapErr, rngs::SysRng};
 use std::time::Instant;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 impl AttemptId {
@@ -30,7 +31,7 @@ impl ApprovedSession {
         if code.len() != 8 || !code.iter().all(u8::is_ascii_digit) || certificate_der.is_empty() {
             return Err(Error::InvalidInput);
         }
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let setup = ServerSetup::<Suite>::new(&mut rng);
         let client =
             ClientRegistration::<Suite>::start(&mut rng, code).map_err(|_| Error::Crypto)?;
@@ -70,6 +71,11 @@ impl ApprovedSession {
     pub fn untouched(&self) -> bool {
         self.starts == 0
     }
+    /// True once every guess is spent. Such a code can't be guessed again, so
+    /// the PC may replace it.
+    pub fn exhausted(&self) -> bool {
+        self.starts >= MAX_STARTS
+    }
     fn check(&mut self, now: Instant) -> Result<(), Error> {
         if now >= self.until {
             self.close();
@@ -93,17 +99,16 @@ impl ApprovedSession {
         if self.starts >= MAX_STARTS {
             return Err(Error::Limit);
         }
-        // ! Count the guess before parsing and before any reply, even if the
-        //   client disconnects.
+        // ! Count the guess before parsing and before any reply, even if the client disconnects.
         self.starts += 1;
         if request.len() != REQUEST_LEN {
             return Err(Error::InvalidInput);
         }
         let request =
             CredentialRequest::<Suite>::deserialize(request).map_err(|_| Error::InvalidInput)?;
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let mut id = [0; 32];
-        rng.try_fill_bytes(&mut id).map_err(|_| Error::Crypto)?;
+        rng.fill_bytes(&mut id);
         let login = ServerLogin::start(
             &mut rng,
             self.setup.as_ref().ok_or(Error::Closed)?,
@@ -135,7 +140,7 @@ impl ApprovedSession {
     pub fn holds_attempt(&self, id: AttemptId) -> bool {
         self.exchange
             .as_ref()
-            .is_some_and(|exchange| exchange.id == id)
+            .is_some_and(|exchange| bool::from(exchange.id.ct_eq(&id)))
     }
     pub fn finish(&mut self, id: AttemptId, confirmation: &[u8]) -> Result<Authenticated, Error> {
         self.finish_at(id, confirmation, Instant::now())
@@ -147,7 +152,11 @@ impl ApprovedSession {
         now: Instant,
     ) -> Result<Authenticated, Error> {
         self.check(now)?;
-        if self.exchange.as_ref().is_none_or(|e| e.id != id) {
+        if self
+            .exchange
+            .as_ref()
+            .is_none_or(|e| !bool::from(e.id.ct_eq(&id)))
+        {
             return Err(Error::StaleAttempt);
         }
         // ! A correct attempt is used up even if the confirmation is malformed or fails.

@@ -16,7 +16,13 @@ pub struct WaitReply {
     pub(super) version: u32,
     pub(super) ok: bool,
     pub host_id: String,
+    /// Changes whenever the service process starts, so a restart is visible even
+    /// when the new sequences pass an old cursor.
+    pub epoch: String,
     pub baseline_sequence: u64,
+    /// The service is stopping and answers at once; waiting again right away
+    /// would only spin until the pipe goes away.
+    pub closed: bool,
     pub events: Vec<HostEvent>,
 }
 
@@ -36,6 +42,7 @@ pub enum ControlRequest<'a> {
     Status,
     WaitEvents {
         after: u64,
+        epoch: Option<&'a str>,
     },
     List,
     OpenPairing {

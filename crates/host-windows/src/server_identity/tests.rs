@@ -102,3 +102,30 @@ async fn a_pipe_served_by_another_process_is_refused_before_any_request() {
     assert_ne!(refused.kind(), std::io::ErrorKind::PermissionDenied);
     assert_ne!(refused.kind(), std::io::ErrorKind::NotFound);
 }
+
+#[tokio::test]
+async fn a_client_waits_for_a_busy_pipe_instead_of_failing() {
+    let name = format!(
+        r"\\.\pipe\MyRigHost.Busy.Test.{}.{}",
+        std::process::id(),
+        NEXT_PIPE.fetch_add(1, Ordering::Relaxed)
+    );
+    let _first = ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .create(&name)
+        .unwrap();
+    let _occupant = connect_client(&name).unwrap();
+    // * While every instance is connected, a second client gets ERROR_PIPE_BUSY until the server
+    // * opens another instance.
+    let waiting = {
+        let name = name.clone();
+        tokio::task::spawn_blocking(move || connect_client(&name).map(drop))
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let _second = ServerOptions::new()
+        .reject_remote_clients(true)
+        .create(&name)
+        .unwrap();
+    waiting.await.unwrap().unwrap();
+}

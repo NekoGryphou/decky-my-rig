@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 Use-Rust
 Assert-Prerequisites -Arm64:($Architectures -contains 'aarch64')
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).ProviderPath
-$version = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
+$version = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $root 'Cargo.toml')), '(?ms)^\[workspace\.package\].*?^version = "([^"]+)"').Groups[1].Value
 $release = Join-Path $root 'out\release'
 $env:CARGO_TARGET_DIR = Join-Path $root 'out\cargo'
 # ? No Visual C++ runtime to install beside myrig.exe.
@@ -16,6 +16,8 @@ foreach ($arch in $Architectures) {
     & (Join-Path $root 'packaging\windows\build_installer.ps1') -Arch $arch
     $target = "$arch-pc-windows-msvc"
     Invoke-Checked cargo @('build', '--manifest-path', (Join-Path $root 'Cargo.toml'), '--locked', '--release', '--target', $target, '-p', 'myrig-cli')
+    # ? The plugin build refuses an agent that has no stamp of its inputs.
+    Invoke-Checked cargo @('xtask', 'stamp', (Join-Path $env:CARGO_TARGET_DIR "$target\release\myrig.exe"))
     $archive = Join-Path $release "myrig-cli-v$version-$arch-windows.zip"
     Compress-Archive -LiteralPath (Join-Path $env:CARGO_TARGET_DIR "$target\release\myrig.exe") -DestinationPath $archive -Force
     $archive

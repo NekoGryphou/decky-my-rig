@@ -19,19 +19,23 @@ impl Power for NoPower {
     fn schedule_shutdown(&self) -> Result<(), PowerError> {
         panic!("local control must not schedule power")
     }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        panic!("local control must not cancel power")
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
     let _ = is_event_wait_request(data);
     let host = Host::new(
-        RegistryConfig::from_json(CONFIG).unwrap(),
+        RegistryConfig::from_json(CONFIG).expect("CONFIG is a fixed, valid schema-3 document"),
         Core::new(Box::new(NoPower)),
         "Fuzz PC".into(),
         Arc::new(|_| Ok(())),
     );
     let reply = execute(&host, data, |_| Ok(()));
     assert!(reply.len() <= RESPONSE_LIMIT);
-    let reply: Value = serde_json::from_slice(&reply).unwrap();
+    let reply: Value =
+        serde_json::from_slice(&reply).expect("execute replies with serde_json text only");
     assert_eq!(reply["version"], 1);
     assert!(reply["ok"].is_boolean());
 });

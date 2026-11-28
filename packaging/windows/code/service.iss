@@ -13,7 +13,7 @@ begin
     RaiseException(ServiceNotOwned);
 end;
 
-// sc.exe prints the numeric state code in every Windows language.
+// - sc.exe prints the numeric state code in every Windows language.
 function ServiceState: Integer;
 var
   ExitCode, I, StateCode: Integer;
@@ -51,7 +51,7 @@ begin
   end;
 end;
 
-// A service already stopping refuses `sc stop`; waiting covers both cases.
+// ? A service already stopping refuses `sc stop`; waiting covers both cases.
 procedure StopServiceAndWait;
 begin
   if IsServiceStopped then Exit;
@@ -110,9 +110,9 @@ begin
   RunRequired(SystemTool('sc.exe'), 'sidtype ' + ServiceName + ' unrestricted');
   RunRequired(SystemTool('sc.exe'), 'privs ' + ServiceName +
     ' SeChangeNotifyPrivilege/SeShutdownPrivilege');
-  // A fatal error exits with an error code, not a crash. The failure flag makes
-  // Windows restart the service either way. The one-day reset period caps the
-  // restarts, so a configuration that cannot load does not loop.
+  // ? A fatal error exits with an error code, not a crash. The failure flag makes Windows restart
+  // ? the service either way. The one-day reset period caps the restarts, so a configuration that
+  // ? cannot load does not loop.
   RunRequired(SystemTool('sc.exe'),
     'failure ' + ServiceName + ' reset= 86400 actions= restart/5000/restart/60000//');
   RunRequired(SystemTool('sc.exe'), 'failureflag ' + ServiceName + ' 1');

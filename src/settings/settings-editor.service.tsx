@@ -1,19 +1,11 @@
 import { Navigation, showModal } from "@decky/ui";
 import { toaster } from "@decky/api";
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { useEffect, useRef, useState } from "react";
-import {
-  beginPairing,
-  cancelPairing,
-  deletePc,
-  detectMac,
-  fetchSettings,
-  requestPairingCode,
-  savePairing,
-  updatePc,
-} from "../shared/api.service";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../shared/api.service";
 import { PRODUCT_NAME } from "../shared/product.messages";
 import type {
+  EditorActions,
   EditorLoad,
   EditorStep,
   FormState,
@@ -29,10 +21,11 @@ import {
 } from "./settings.messages";
 import { PairingCode } from "./pairing-code.view";
 
-/** The editor's state for this render; it starts loading an existing PC. */
-export function useSettingsEditor(
-  editingId: string | null,
-): SettingsEditorState {
+/** The editor's state and its actions; it starts loading an existing PC. */
+export function useSettingsEditor(editingId: string | null): {
+  editor: SettingsEditorState;
+  actions: EditorActions;
+} {
   const [form, setForm] = useState<FormState>(blankForm);
   const [step, setStep] = useState<EditorStep>(
     editingId ? "details" : "connection",
@@ -45,36 +38,78 @@ export function useSettingsEditor(
   const alive = useRef(true);
   const working = useRef(false);
   const draft = useRef<string | null>(null);
+  const latest = useRef<SettingsEditorState | null>(null);
 
   useEffect(() => {
     alive.current = true;
     if (editingId) loadPc(editingId, alive, setForm, setLoad, setError);
-    return () => {
-      alive.current = false;
-      discard(draft);
-    };
+    return () => release(alive, working, draft, setError);
   }, [editingId]);
 
-  return {
-    editingId,
-    form,
-    step,
-    load,
-    operation,
-    paired,
-    error,
-    macError,
-    alive,
-    working,
-    draft,
-    setForm,
-    setStep,
-    setLoad,
-    setOperation,
-    setPaired,
-    setError,
-    setMacError,
-  };
+  const editor = useMemo<SettingsEditorState>(
+    () => ({
+      editingId,
+      form,
+      step,
+      load,
+      operation,
+      paired,
+      error,
+      macError,
+      alive,
+      working,
+      draft,
+      latest,
+      setForm,
+      setStep,
+      setLoad,
+      setOperation,
+      setPaired,
+      setError,
+      setMacError,
+    }),
+    [editingId, form, step, load, operation, paired, error, macError],
+  );
+  useEffect(() => {
+    latest.current = editor;
+  });
+
+  const actions = useMemo<EditorActions>(
+    () => ({
+      setField: (name, value) => {
+        if (latest.current) setField(latest.current, name, value);
+      },
+      detect: () => {
+        if (latest.current) void detect(latest.current);
+      },
+      pairAgain: () => {
+        if (latest.current) pairAgain(latest.current);
+      },
+      remove: () => {
+        if (latest.current) void remove(latest.current);
+      },
+      submit: () => {
+        if (latest.current) submit(latest.current);
+      },
+      leave: () => {
+        if (latest.current) leave(latest.current);
+      },
+    }),
+    [],
+  );
+  return { editor, actions };
+}
+
+/** Unmount: a save or pairing still running owns its draft, so it stays. */
+function release(
+  alive: RefObject<boolean>,
+  working: RefObject<boolean>,
+  draft: RefObject<string | null>,
+  setError: Dispatch<SetStateAction<string>>,
+) {
+  alive.current = false;
+  // ! A save still running owns its draft, so unmounting must not cancel it.
+  if (!working.current) discard(draft, alive, setError);
 }
 
 function loadPc(
@@ -84,7 +119,8 @@ function loadPc(
   setLoad: Dispatch<SetStateAction<EditorLoad>>,
   setError: Dispatch<SetStateAction<string>>,
 ) {
-  void fetchSettings()
+  void api
+    .fetchSettings()
     .then((pcs) => {
       if (!alive.current) return;
       const pc = pcs.find((item) => item.id === editingId);
@@ -108,14 +144,28 @@ function loadPc(
     });
 }
 
-/** Cancels the unsaved pairing, if any. */
-function discard(draft: RefObject<string | null>) {
+/** Cancels the unsaved pairing, if any; a failure goes to the user. */
+function discard(
+  draft: RefObject<string | null>,
+  alive: RefObject<boolean>,
+  setError: Dispatch<SetStateAction<string>>,
+) {
   const id = draft.current;
   draft.current = null;
-  if (id) void cancelPairing(id).catch(() => {});
+  if (!id) return;
+  api.cancelPairing(id).catch((failure: unknown) => {
+    // - The editor shows it while it is open, a toast once it is gone.
+    if (alive.current) setError(settingsError(failure));
+    else
+      toaster.toast({
+        title: PRODUCT_NAME,
+        body: settingsError(failure),
+        showToast: true,
+      });
+  });
 }
 
-export function setField(
+function setField(
   editor: SettingsEditorState,
   name: keyof FormState,
   value: string,
@@ -123,9 +173,9 @@ export function setField(
   editor.setForm((current) => ({ ...current, [name]: value }));
 }
 
-export function leave(editor: SettingsEditorState) {
+function leave(editor: SettingsEditorState) {
   editor.alive.current = false;
-  discard(editor.draft);
+  discard(editor.draft, editor.alive, editor.setError);
   Navigation.NavigateBack();
 }
 
@@ -157,16 +207,24 @@ async function askCode(editor: SettingsEditorState) {
     "request",
     async () => {
       editor.setError("");
-      await requestPairingCode(editor.form.host, editor.form.port);
+      await api.requestPairingCode(editor.form.host, editor.form.port);
       if (editor.alive.current)
-        showModal(<PairingCode onSubmit={(code) => void pair(editor, code)} />);
+        showModal(
+          <PairingCode
+            onSubmit={(code) => {
+              // ! The newest state, not this render's: the form may have changed.
+              const current = editor.latest.current;
+              if (current) void pair(current, code);
+            }}
+          />,
+        );
     },
     (failure) => editor.setError(settingsError(failure)),
   );
 }
 
-export function pairAgain(editor: SettingsEditorState) {
-  discard(editor.draft);
+function pairAgain(editor: SettingsEditorState) {
+  discard(editor.draft, editor.alive, editor.setError);
   editor.setPaired(false);
   editor.setError("");
   editor.setMacError("");
@@ -184,15 +242,17 @@ async function pair(editor: SettingsEditorState, code: string) {
     async () => {
       editor.setError("");
       draft.current = id;
-      const result = await beginPairing(
+      const result = await api.beginPairing(
         id,
         editor.form.host,
         editor.form.port,
         code,
         editingId,
       );
-      if (!editor.alive.current || draft.current !== id) {
-        void cancelPairing(id).catch(() => {});
+      // ! Whoever took the draft away already cancelled it; a second cancel would be a duplicate.
+      if (draft.current !== id) return;
+      if (!editor.alive.current) {
+        discard(draft, editor.alive, editor.setError);
         return;
       }
       editor.setForm((current) => ({
@@ -207,7 +267,7 @@ async function pair(editor: SettingsEditorState, code: string) {
     },
     (failure) => {
       if (draft.current !== id) return;
-      discard(draft);
+      discard(draft, editor.alive, editor.setError);
       editor.setError(settingsError(failure));
     },
   );
@@ -222,32 +282,32 @@ async function save(editor: SettingsEditorState) {
     async () => {
       editor.setError("");
       if (paired && draft.current) {
-        await savePairing(draft.current, form.name, form.mac);
+        await api.savePairing(draft.current, form.name, form.mac);
         // ! Saved: the draft is used up and mustn't be canceled on leave.
         draft.current = null;
-      } else if (editingId) await updatePc(editingId, form);
+      } else if (editingId) await api.updatePc(editingId, form);
       if (editor.alive.current) leave(editor);
     },
-    // ? Keep the draft: fixing a field lets Save work again, and Pair again
-    //   starts over when the backend says the pairing itself is gone.
+    // ? Keep the draft: fixing a field lets Save work again, and Pair again starts over when the
+    // ? backend says the pairing itself is gone.
     (failure) => editor.setError(settingsError(failure)),
   );
 }
 
-export async function detect(editor: SettingsEditorState) {
+async function detect(editor: SettingsEditorState) {
   await run(
     editor,
     "detect",
     async () => {
       editor.setMacError("");
-      const mac = await detectMac(editor.form.host);
+      const mac = await api.detectMac(editor.form.host);
       if (editor.alive.current) setField(editor, "mac", mac);
     },
     () => editor.setMacError(MAC_ERROR),
   );
 }
 
-export async function remove(editor: SettingsEditorState) {
+async function remove(editor: SettingsEditorState) {
   const { editingId } = editor;
   if (!editingId) return;
   await run(
@@ -255,7 +315,7 @@ export async function remove(editor: SettingsEditorState) {
     "delete",
     async () => {
       editor.setError("");
-      const { unpaired } = await deletePc(editingId);
+      const { unpaired } = await api.deletePc(editingId);
       if (!unpaired)
         toaster.toast({
           title: PRODUCT_NAME,
@@ -269,7 +329,7 @@ export async function remove(editor: SettingsEditorState) {
 }
 
 /** Next asks the PC for a code; Save stores the PC. */
-export function submit(editor: SettingsEditorState) {
+function submit(editor: SettingsEditorState) {
   if (editor.step === "connection") void askCode(editor);
   else void save(editor);
 }

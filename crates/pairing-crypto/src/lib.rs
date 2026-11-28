@@ -34,6 +34,9 @@ impl CipherSuite for Suite {
     type Ksf = Argon2<'static>;
 }
 
+// ! The parameters are constants inside the limits Argon2 checks, so the expect below cannot fail.
+// ! Any other input would be a code change here.
+#[allow(clippy::expect_used)]
 fn stretch() -> Argon2<'static> {
     Argon2::new(
         Algorithm::Argon2id,
@@ -43,9 +46,8 @@ fn stretch() -> Argon2<'static> {
     )
 }
 
-// ! Each side uses the certificate it saw on its own TLS connection, never a
-//   fingerprint the other side sent. The exchange fails unless both saw the same
-//   one.
+// ! Each side uses the certificate it saw on its own TLS connection, never a fingerprint the other
+// ! side sent. The exchange fails unless both saw the same one.
 fn context(certificate_der: &[u8], session: &[u8; 32]) -> Vec<u8> {
     let mut result = b"DeckyMyRig/opaque-bootstrap/v1\0".to_vec();
     result.extend_from_slice(&Sha256::digest(certificate_der));

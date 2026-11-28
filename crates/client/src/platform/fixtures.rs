@@ -1,5 +1,6 @@
 //! A portable fake platform: plain files, a lock file, and network and neighbor
 //! answers set by the test.
+use super::InputEcho;
 use super::{Platform, Settings};
 use std::{
     fs::{self, File},
@@ -15,6 +16,8 @@ const DOCUMENT: &str = "pcs.json";
 pub(crate) struct TestPlatform {
     pub(crate) interfaces: Vec<(Ipv4Addr, Ipv4Addr)>,
     pub(crate) neighbors: Vec<(Ipv4Addr, String)>,
+    /// How many times input was asked to hide its echo.
+    pub(crate) hidden: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 pub(crate) fn platform() -> Arc<dyn Platform> {
@@ -27,6 +30,11 @@ struct TestSettings {
 }
 
 impl Platform for TestPlatform {
+    fn hide_input(&self) -> Option<Box<dyn InputEcho>> {
+        self.hidden
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(Box::new(()))
+    }
     fn settings_directory(&self) -> Result<PathBuf, &'static str> {
         Err("tests pass the settings directory")
     }
@@ -59,8 +67,7 @@ impl Platform for TestPlatform {
 
 impl Settings for TestSettings {
     fn lock(&self) -> io::Result<()> {
-        // ? Next to the directory, so tests listing its entries only see the
-        //   document.
+        // ? Next to the directory, so tests listing its entries only see the document.
         let mut name = self.directory.clone().into_os_string();
         name.push(".lock");
         let file = File::create(PathBuf::from(name))?;
@@ -85,4 +92,14 @@ impl Settings for TestSettings {
         fs::write(&temporary, contents)?;
         fs::rename(temporary, self.directory.join(DOCUMENT))
     }
+}
+
+/// Takes the directory lock like another process would; dropping the file
+/// releases it.
+pub(crate) fn lock_held_elsewhere(directory: &Path) -> File {
+    let mut name = directory.to_owned().into_os_string();
+    name.push(".lock");
+    let file = File::create(PathBuf::from(name)).unwrap();
+    file.lock().unwrap();
+    file
 }

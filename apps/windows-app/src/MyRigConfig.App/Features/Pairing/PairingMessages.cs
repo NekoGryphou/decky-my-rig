@@ -20,7 +20,7 @@ internal static class PairingMessages
         $"The code could not be cancelled. It will expire within {PairingProtocolConstants.LifetimeSeconds / 60} minutes.";
 
     public const string HostChanged = "The service changed. Try again.";
-    public const string InvalidName = SharedMessages.InvalidDeviceName;
+    public static string InvalidName => SharedMessages.InvalidDeviceName;
     public const string CodeFailed = "Couldn't create a code.";
     public const string Unreachable = SharedMessages.ServiceUnreachable;
 

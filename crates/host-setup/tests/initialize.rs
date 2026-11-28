@@ -40,8 +40,8 @@ fn a_taken_port_moves_to_the_next_free_one() {
 
 #[test]
 fn the_port_probe_never_listens() {
-    // ? A probe that listens makes Windows Firewall prompt for the setup helper
-    //   and keep an inbound rule for it.
+    // ? A probe that listens makes Windows Firewall prompt for the setup helper and keep an inbound
+    // ? rule for it.
     let probe = myrig_setup::probe_port(0).unwrap();
     let port = probe.local_addr().unwrap().as_socket().unwrap().port();
     assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());

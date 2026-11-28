@@ -44,8 +44,8 @@ Source: "{#PayloadDir}\myrig-host.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\App\*"; DestDir: "{app}\App"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\myrig-notifier.exe"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: FinalizeInstall
 
-; ? The service's event source. EventLogMessages.dll maps every event ID to
-;   its first insertion string, which is the whole message.
+; ? The service's event source. EventLogMessages.dll maps every event ID to its first insertion
+; ? string, which is the whole message.
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\MyRigHost"; ValueType: expandsz; ValueName: "EventMessageFile"; ValueData: "%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\EventLogMessages.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\MyRigHost"; ValueType: dword; ValueName: "TypesSupported"; ValueData: 7
@@ -54,7 +54,9 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\MyRi
 Name: "{commonprograms}\My Rig"; Filename: "{app}\App\MyRigConfig.exe"
 
 [Run]
-Filename: "{app}\myrig-notifier.exe"; Parameters: "--enable-autostart"; Flags: runasoriginaluser runhidden; Check: InstallSucceeded
+; ? A fresh install turns the login entry on; the notifier itself never adds it, so a later
+; ? --disable-autostart stays in force across upgrades.
+Filename: "{app}\myrig-notifier.exe"; Parameters: "--enable-autostart"; Flags: runasoriginaluser runhidden waituntilterminated; Check: FreshInstallSucceeded
 Filename: "{app}\myrig-notifier.exe"; Flags: runasoriginaluser runhidden nowait; Check: InstallSucceeded
 
 [Code]
@@ -105,6 +107,11 @@ begin
   Result := InstallFailure = '';
 end;
 
+function FreshInstallSucceeded: Boolean;
+begin
+  Result := InstallSucceeded and FreshInstall;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
@@ -113,6 +120,7 @@ begin
     if Result <> '' then Exit;
     VerifyOwnedService;
     VerifyOwnedConfiguration;
+    ClearStaleOwnership;
     FreshInstall := not ServiceExists and not DirExists(ConfigDirectory) and
       not DirExists(SecurityDirectory);
     GroupWasPresent := RunSucceeded(SystemTool('net.exe'), 'localgroup ' + Quoted(ManagerGroup));
@@ -120,6 +128,7 @@ begin
     if ServiceWasStopped then StopServiceAndWait;
     if FileExists(ExpandConstant('{app}\myrig-notifier.exe')) then
       StopOwnedNotifiers;
+    StopOwnedApp;
   except
     Result := GetExceptionMessage;
   end;
@@ -131,7 +140,8 @@ begin
     GrantAppReadAccess(ExpandConstant('{app}'));
     EnsureManagerGroup;
     EnsureService;
-    if FreshInstall then CreateProtectedData;
+    if FreshInstall then CreateProtectedData
+    else VerifyOwnedFolderAccess;
     EnsureProtectedData;
     ProvisionIfNeeded;
     EnsureFirewall;
@@ -165,7 +175,7 @@ begin
   if CurUninstallStep <> usUninstall then Exit;
   VerifyOwnedService;
   VerifyOwnedConfiguration;
-  // Refuse before changing anything if the rule name belongs to another program.
+  // - Refuse before changing anything if the rule name belongs to another program.
   Policy := CreateOleObject('HNetCfg.FwPolicy2');
   RuleFound := FindOwnedFirewallRule(Policy, Rule);
   if ServiceExists then begin
@@ -175,11 +185,12 @@ begin
   if RuleFound then Policy.Rules.Remove(FirewallRuleName);
   RemoveManagerGroup;
   StopOwnedNotifiers;
+  StopOwnedApp;
   RemoveNotifierAutostart;
-  // Silent uninstall keeps the configuration.
+  // - Silent uninstall keeps the configuration.
   if SuppressibleMsgBox(KeepConfigurationQuestion, mbConfirmation, MB_YESNO, IDYES) = IDNO then begin
-    // The ownership record goes only with the data, or the next install
-    // would refuse the leftover folder as not its own.
+    // ? The ownership record goes only with the data, or the next install would refuse the leftover
+    // ? folder as not its own.
     if DelTree(ConfigDirectory, True, True, True) and
        DelTree(SecurityDirectory, True, True, True) then
       RegDeleteValue(HKLM, OwnershipKey, DataOwnedValue);

@@ -13,6 +13,8 @@ fn new_host_has_matching_tls_identity_and_empty_registry() {
         .expect("matching TLS identity")
         .into_identity();
     assert!(!identity.leaf_der().is_empty());
+    assert_eq!(config.host_id().get_version_num(), 4);
+    assert_eq!(config.host_id().get_variant(), uuid::Variant::RFC4122);
 }
 
 #[test]

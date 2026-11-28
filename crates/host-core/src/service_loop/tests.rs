@@ -12,6 +12,9 @@ impl Power for NoPower {
     fn schedule_shutdown(&self) -> Result<(), PowerError> {
         panic!("service lifecycle must not schedule power")
     }
+    fn cancel_shutdown(&self) -> Result<(), PowerError> {
+        panic!("service lifecycle must not schedule power")
+    }
 }
 fn host() -> Arc<Host> {
     Arc::new(Host::new(
@@ -137,7 +140,7 @@ async fn queued_approval_cannot_reopen_after_stop_barrier() {
                     "12345678",
                     [1; 32],
                     b"certificate",
-                    [2; 32],
+                    &[2; 32],
                     uuid::Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
                     Arc::new(|_| panic!("must not save")),
                 )

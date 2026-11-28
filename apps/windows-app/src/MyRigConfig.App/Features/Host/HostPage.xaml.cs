@@ -25,18 +25,22 @@ public sealed partial class HostPage : Page, IHostDialogs
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
     {
+        // * Loaded can fire again without an Unloaded in between; start from a clean state.
+        Detach();
         lifetime = new CancellationTokenSource();
+        ViewModel.PageLifetime = lifetime.Token;
         App.Window.Closed += Window_Closed;
         App.Window.Activated += Window_Activated;
         refreshTimer = DispatcherQueue.CreateTimer();
         refreshTimer.Interval = RefreshInterval;
         refreshTimer.Tick += (_, _) => RefreshInBackground();
         refreshTimer.Start();
-        await ViewModel.RefreshCommand.ExecuteAsync(null);
+        try { await ViewModel.RefreshCommand.ExecuteAsync(null); }
+        catch (OperationCanceledException) { }
     }
 
-    // ? Like Windows Settings, there's no Refresh button. The page refreshes when the window gets
-    //   focus again, and every so often while it's open.
+    // ? Like Windows Settings, there's no Refresh button. The page refreshes when the window gets focus again, and
+    // ? every so often while it's open.
     private void Window_Activated(object sender, WindowActivatedEventArgs args)
     {
         if (args.WindowActivationState != WindowActivationState.Deactivated) RefreshInBackground();
@@ -53,33 +57,41 @@ public sealed partial class HostPage : Page, IHostDialogs
 
     private void Window_Closed(object sender, WindowEventArgs args) => Retire();
 
-    private void Retire()
+    private void Detach()
     {
         App.Window.Closed -= Window_Closed;
         App.Window.Activated -= Window_Activated;
         refreshTimer?.Stop();
         refreshTimer = null;
-        ViewModel.RefreshCommand.Cancel();
-        ViewModel.StartServiceCommand.Cancel();
-        ViewModel.PairCommand.Cancel();
-        ViewModel.RenameCommand.Cancel();
-        ViewModel.RemoveCommand.Cancel();
-        ViewModel.ChangePortCommand.Cancel();
-        ViewModel.ChangeTestModeCommand.Cancel();
-        ViewModel.RestartServiceCommand.Cancel();
         lifetime?.Cancel();
         lifetime?.Dispose();
         lifetime = null;
     }
 
-    // ? ToggleSwitch has no Command, so the view model puts the confirmed value back. The switch is
-    //   disabled while the change is saved, which takes its focus away, so keyboard users get their
-    //   focus back afterwards.
+    private async void Retire()
+    {
+        Detach();
+        // ! A pairing code still showing would stay valid on the host with nobody watching it.
+        try { await ViewModel.RetireAsync(); }
+        catch (Exception exception) { ErrorLogService.Write(exception); }
+    }
+
+    // ? ToggleSwitch has no Command, so the view model restores the confirmed value. Disabling the switch while saving
+    // ? takes its focus away, so focus is put back afterwards.
     private async void TestMode_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleSwitch toggle) return;
         var focused = toggle.FocusState != FocusState.Unfocused;
-        await ViewModel.ChangeTestModeCommand.ExecuteAsync(toggle.IsOn);
+        try
+        {
+            await ViewModel.ChangeTestModeCommand.ExecuteAsync(toggle.IsOn);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            // ! Same reason as the pairing dialog: an escaped exception ends the app.
+            ViewModel.ReportTestModeFailed(exception);
+        }
         if (focused) toggle.Focus(FocusState.Programmatic);
     }
 
@@ -90,7 +102,7 @@ public sealed partial class HostPage : Page, IHostDialogs
     }
 
     public Task<bool> ConfirmRemovalAsync(string name) =>
-        ConfirmAsync(HostMessages.RemoveDialogTitle(name), HostMessages.RemoveMessage, HostMessages.RemoveAction);
+        ConfirmAsync(HostMessages.RemoveDialogTitle(name), HostMessages.RemoveAction);
 
     public async Task<int?> AskPortAsync(int current)
     {
@@ -112,14 +124,13 @@ public sealed partial class HostPage : Page, IHostDialogs
             : null;
     }
 
-    private async Task<bool> ConfirmAsync(string title, string? message, string primary)
+    private async Task<bool> ConfirmAsync(string title, string primary)
     {
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             Style = (Style)Application.Current.Resources["DefaultContentDialogStyle"],
             Title = title,
-            Content = message,
             PrimaryButtonText = primary,
             CloseButtonText = SharedMessages.Cancel,
             DefaultButton = ContentDialogButton.Close,

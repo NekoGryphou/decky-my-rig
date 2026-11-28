@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-# ? Windows PowerShell 5.1 may default to TLS 1.0, which nuget.org refuses, and
-#   its progress bar makes the download several times slower.
+# ? Windows PowerShell 5.1 may default to TLS 1.0, which nuget.org refuses, and its progress bar
+# ? makes the download several times slower.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
 $version = '7.1.0'

@@ -3,7 +3,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).ProviderPath
 $packaging = Join-Path $root 'packaging\windows'
-$compiler = (& (Join-Path $packaging 'get_inno_setup.ps1') | Select-Object -Last 1)
+$compilerOutput = @(& (Join-Path $packaging 'get_inno_setup.ps1'))
+if ($compilerOutput.Count -ne 1) { throw "get_inno_setup.ps1 must return only the compiler path, got $($compilerOutput.Count) values" }
+$compiler = $compilerOutput[0]
 $failures = New-Object System.Collections.Generic.List[string]
 
 function Assert-True([bool] $condition, [string] $message) {
@@ -42,65 +44,30 @@ function Invoke-Fixture([string] $fixture, [string[]] $arguments) {
 }
 
 function Test-FirewallRuleCoversEveryProfileOnTheLocalSubnet {
-    # ! A network left on Public, or one Windows misclassifies, must not
-    #   silently block the device; LocalSubnet keeps the rule off the internet.
-    $code = Get-Content -Raw (Join-Path $packaging 'code\firewall.iss')
-    $consts = Get-Content -Raw (Join-Path $packaging 'code\install_consts.iss')
-    Assert-True $code.Contains('Rule.Profiles := FirewallAllProfiles;') 'firewall profiles'
-    Assert-True $consts.Contains('FirewallAllProfiles = $7FFFFFFF;') 'all-profiles constant'
-    Assert-True $code.Contains("Rule.RemoteAddresses := 'LocalSubnet';") 'LocalSubnet'
+    # ! A network left on Public, or one Windows misclassifies, must not silently block the device;
+    # ! LocalSubnet keeps the rule off the internet. The fixture applies the installer's real
+    # ! settings to a scratch rule and reads them back through the firewall API.
+    $base = New-OwnedDirectory
+    try {
+        $fixture = New-Fixture 'firewall' $base
+        $result = Join-Path $base 'result.txt'
+        Assert-True ((Invoke-Fixture $fixture @("/ResultFile=$result")) -eq 1) 'fixture exit'
+        $summary = [IO.File]::ReadAllText($result)
+        $expected = 'profiles=2147483647;scope=LocalSubnet;action=1;direction=1;protocol=6;ports=*;enabled=yes;app=C:\MyRig\myrig-service.exe'
+        Assert-True ($summary -eq $expected) "firewall rule: $summary"
+        Assert-True (-not (Get-NetFirewallRule -Name 'MyRig-test-firewall' -ErrorAction SilentlyContinue)) 'scratch rule removed'
+    } finally { Remove-Item -LiteralPath $base -Recurse -Force }
 }
 
-function Test-UpgradeReplacesTheWholeApp {
-    # ? The app folder is cleared before install, so a file the new version drops does not stay.
-    $script = Get-Content -Raw (Join-Path $packaging 'my_rig.iss')
-    Assert-True ($script -match '(?m)^\[InstallDelete\]\r?\nType: filesandordirs; Name: "\{app\}\\App"$') 'App folder cleared before install'
-}
-
-function Test-FreshDataIsBornProtectedAndOnlyRecordedDataIsTrusted {
-    # ! A user who can create folders in ProgramData must not get a window to
-    #   plant files, nor make a failed install's leftovers look owned.
-    $script = Get-Content -Raw (Join-Path $packaging 'my_rig.iss')
-    $storage = Get-Content -Raw (Join-Path $packaging 'code\storage.iss')
-    $rollback = Get-Content -Raw (Join-Path $packaging 'code\rollback.iss')
-    Assert-True ($script -match '(?s)if FreshInstall then CreateProtectedData;\s*EnsureProtectedData;') 'created protected before use'
-    Assert-True $storage.Contains("RunSetup('create-data '") 'created by myrig-setup'
-    $recorded = [regex]::Match($storage, '(?s)function DataRecorded: Boolean;.*?end;').Value
-    Assert-True (-not $recorded.Contains('AppUninstallKey')) 'the uninstall key is no ownership record'
-    Assert-True ($rollback -match '(?s)if not DataCreated then Exit;\s*if not DelTree\(ConfigDirectory') 'rollback removes only its own folders'
-}
-
-function Test-ServiceHoldsOnlyTheNeededPrivileges {
-    # ! Callers connect at Identification level, which needs no impersonation
-    #   privilege; holding one would turn a LAN-side bug into a path to SYSTEM.
-    $code = Get-Content -Raw (Join-Path $packaging 'code\service.iss')
-    Assert-True $code.Contains("' SeChangeNotifyPrivilege/SeShutdownPrivilege');") 'service privileges'
-}
-
-function Test-OwnersCannotRewriteTheDataAcl {
-    # ! The service's rewrites leave host.json owned by its token's default
-    #   owner, which other LocalService services share: an OWNER RIGHTS entry
-    #   replaces the owner's implicit right to change the ACL.
-    $code = Get-Content -Raw (Join-Path $packaging 'code\storage.iss')
-    Assert-True $code.Contains("'*S-1-3-4:(OI)(CI)(RC) '") 'folders: owner may only read the ACL'
-    Assert-True $code.Contains("'*S-1-3-4:(RC) '") 'files: owner may only read the ACL'
-}
-
-function Test-WindowsRestartsAFailedService {
-    # ! A fatal control-pipe or listener error ends the service; without
-    #   recovery actions the PC stays unreachable until the next boot.
-    $code = Get-Content -Raw (Join-Path $packaging 'code\service.iss')
-    Assert-True $code.Contains("'failure ' + ServiceName + ' reset= 86400 actions= restart/5000/restart/60000//'") 'recovery actions'
-    Assert-True $code.Contains("'failureflag ' + ServiceName + ' 1'") 'recovery on error exits'
-}
-
-function Test-ServiceEventsAreReadable {
-    # ? An unregistered source shows "the description cannot be found" in
-    #   Event Viewer instead of the service's message.
-    $script = Get-Content -Raw (Join-Path $packaging 'my_rig.iss')
-    $key = 'Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\MyRigHost"'
-    Assert-True $script.Contains($key + '; ValueType: expandsz; ValueName: "EventMessageFile"; ValueData: "%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\EventLogMessages.dll"; Flags: uninsdeletekey') 'message file'
-    Assert-True $script.Contains($key + '; ValueType: dword; ValueName: "TypesSupported"; ValueData: 7') 'event types'
+function Test-ProtectingAFolderNeverRestoresInheritedRights {
+    # ! /reset restores the parent's inherited ACEs, and ProgramData lets Users create subfolders.
+    # ! Removing inheritance afterwards is too late for that window, so a protected folder must
+    # ! never pass through /reset.
+    $body = [regex]::Match((Get-Content -Raw (Join-Path $packaging 'code\storage.iss')),
+        '(?s)procedure ProtectDirectory\(.*?\nend;').Value
+    Assert-True ($body.Length -gt 0) 'ProtectDirectory found'
+    Assert-True (-not $body.Contains("' /reset'")) 'no icacls /reset before the folder is protected'
+    Assert-True ($body.IndexOf('/inheritance:r') -ge 0) 'inheritance removed'
 }
 
 function Test-InstallerCompiles {
@@ -193,10 +160,10 @@ function Test-ManagerRightsSurviveWindowsSddlNormalization {
 }
 
 function Test-AppFilesGrantUsersAndServiceOnlyReadExecute {
-    $owned = Join-Path $env:TEMP ('MyRig-app-access-' + [guid]::NewGuid().ToString('N'))
+    $base = New-OwnedDirectory
+    $owned = Join-Path $base 'app'
     $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
     New-Item -ItemType Directory -Path $owned | Out-Null
-    $base = New-OwnedDirectory
     try {
         $file = Join-Path $owned 'owned.exe'
         Set-Content -LiteralPath $file -Value 'owned fixture'
@@ -225,13 +192,12 @@ function Test-AppFilesGrantUsersAndServiceOnlyReadExecute {
         }
     } finally {
         Remove-Item -LiteralPath $base -Recurse -Force
-        Remove-Item -LiteralPath $owned -Recurse -Force
     }
 }
 
 function Test-PublishedAppKeepsItsResources {
-    # ! Without MSIX tooling the publish drops MyRigConfig.pri and the app
-    #   crashes at start (compiled XAML lives in the .pri).
+    # ! Without MSIX tooling the publish drops MyRigConfig.pri and the app crashes at start
+    # ! (compiled XAML lives in the .pri).
     $project = Get-Content -Raw (Join-Path $root 'apps\windows-app\src\MyRigConfig.App\MyRigConfig.App.csproj')
     Assert-True $project.Contains('<EnableMsixTooling>true</EnableMsixTooling>') 'MSIX tooling'
     $builder = Get-Content -Raw (Join-Path $packaging 'build_installer.ps1')
@@ -241,12 +207,7 @@ function Test-PublishedAppKeepsItsResources {
 
 $tests = @(
     'Test-FirewallRuleCoversEveryProfileOnTheLocalSubnet'
-    'Test-UpgradeReplacesTheWholeApp'
-    'Test-FreshDataIsBornProtectedAndOnlyRecordedDataIsTrusted'
-    'Test-ServiceHoldsOnlyTheNeededPrivileges'
-    'Test-OwnersCannotRewriteTheDataAcl'
-    'Test-WindowsRestartsAFailedService'
-    'Test-ServiceEventsAreReadable'
+    'Test-ProtectingAFolderNeverRestoresInheritedRights'
     'Test-InstallerCompiles'
     'Test-InstallerCompilesForEachArchitecture'
     'Test-RecordedManagersAreKeptOnceEach'

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import importlib.util
 import os
 import stat
@@ -10,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from my_rig.agent import AgentClient, AgentError
+from my_rig.agent.agent_consts import STDERR_LINE_LIMIT
 
 FIXTURE = Path(__file__).with_name("agent_fixtures.py")
 UNAVAILABLE = "Decky My Rig is unavailable. Reload the plugin."
@@ -103,6 +105,48 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(agent.call("settings", {}), 5)
             self.assertEqual(str(raised.exception), UNAVAILABLE)
 
+    async def test_a_call_the_agent_never_answers_times_out(self) -> None:
+        agent = await self.started("hang")
+        with patch("my_rig.agent.agent.CALL_TIMEOUT_SECONDS", 0.2):
+            with self.assertRaises(AgentError) as raised:
+                await agent.call("begin_pairing", {})
+        self.assertEqual(str(raised.exception), UNAVAILABLE)
+        await agent.close()
+
+    async def test_a_wedged_agent_is_restarted_after_a_timeout(self) -> None:
+        agent = await self.started("wedge")
+        first = agent._process
+        with (
+            patch("my_rig.agent.agent.CALL_TIMEOUT_SECONDS", 0.2),
+            patch("my_rig.agent.agent.EXIT_TIMEOUT_SECONDS", 0.2),
+        ):
+            with self.assertRaises(AgentError) as raised:
+                await agent.call("settings", {})
+            self.assertEqual(str(raised.exception), UNAVAILABLE)
+            recovery = agent._recovery
+            assert recovery is not None
+            await asyncio.wait_for(recovery, 10)
+        self.assertIsNot(agent._process, first)
+        result = await asyncio.wait_for(agent.call("settings", {}), 5)
+        self.assertEqual(result["method"], "settings")
+
+    async def test_a_failed_write_leaves_no_unretrieved_exception(self) -> None:
+        agent = await self.started("echo")
+        process = agent._process
+        assert process is not None and process.stdin is not None
+
+        async def drain_while_the_agent_ends() -> None:
+            # - The reader fails every pending call while the caller still
+            #   writes; the caller then leaves through the write error.
+            agent._fail_pending()
+            raise ConnectionResetError
+
+        with patch.object(process.stdin, "drain", drain_while_the_agent_ends):
+            with self.assertNoLogs("asyncio"):
+                with self.assertRaises(AgentError):
+                    await agent.call("settings", {})
+                gc.collect()
+
     async def test_unload_while_pairing_leaves_no_process(self) -> None:
         agent = await self.started("hang")
         pairing = asyncio.create_task(agent.call("begin_pairing", {}))
@@ -115,8 +159,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(exit_code(process))
 
     async def test_close_finishes_without_waiting_on_the_event_loop(self) -> None:
-        # ! When Decky stops a plugin, its socket listener spins on EOF without
-        #   yielding, so a close that awaits anything never gets to continue.
+        # ! When Decky stops a plugin, its socket listener spins on EOF without yielding, so a close
+        # ! that awaits anything never gets to continue.
         agent = await self.started("echo")
         process = agent._process
         assert process is not None
@@ -172,12 +216,36 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             await self.started("noisy")
             await asyncio.wait_for(self.logger.seen("after the long line"), 5)
 
+    async def test_a_parked_watch_returns_the_current_frame_after_the_bound(
+        self,
+    ) -> None:
+        # ! The frontend abandons a watch after its own stall limit; an abandoned watch must end by
+        # ! itself or each stall leaves one waiter behind.
+        agent = await self.started("echo")
+        first = await asyncio.wait_for(agent.watch(-1), 5)
+        with patch("my_rig.agent.agent.WATCH_TIMEOUT_SECONDS", 0.2):
+            again = await asyncio.wait_for(agent.watch(first["revision"]), 5)
+        self.assertEqual(again, first)
+
+    async def test_error_lines_are_bounded_and_printable(self) -> None:
+        # ! The agent's text reaches the Decky log and the user; a long or escape-laden line must
+        # ! not.
+        agent = await self.started("loud")
+        await asyncio.wait_for(self.logger.seen("zzz"), 5)
+        line = self.logger.errors[-1]
+        self.assertLessEqual(len(line), 400)
+        self.assertTrue(line.isprintable())
+        stored = agent._last_error
+        assert stored is not None
+        self.assertLessEqual(len(stored), STDERR_LINE_LIMIT)
+        self.assertTrue(stored.isprintable())
+
     async def test_watch_long_polls_and_close_releases_watchers(self) -> None:
         agent = await self.started("echo")
         first = await asyncio.wait_for(agent.watch(-1), 5)
         self.assertEqual(first["revision"], 1)
         waiting = asyncio.create_task(agent.watch(1))
-        # - Let every other task run; a watch that doesn't wait would be done by
+        # - Other tasks run first; a watch that doesn't wait would be done by
         #   now.
         for _ in range(50):
             await asyncio.sleep(0)
@@ -194,8 +262,9 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plugin_entry_point_forwards_each_rpc(self) -> None:
         decky = types.ModuleType("decky")
-        setattr(decky, "DECKY_PLUGIN_SETTINGS_DIR", self.directory.name)
-        setattr(decky, "logger", self.logger)
+        decky.__dict__.update(
+            DECKY_PLUGIN_SETTINGS_DIR=self.directory.name, logger=self.logger
+        )
         with patch.dict(sys.modules, {"decky": decky}):
             spec = importlib.util.spec_from_file_location(
                 "plugin_main", Path(__file__).parents[2] / "main.py"
@@ -207,33 +276,49 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             plugin = main.Plugin()
         await plugin._main()
         self.addAsyncCleanup(plugin._unload)
-        self.assertEqual(
-            await plugin.begin_pairing("d", "h", 47991, "12345678", "i"),
-            {
-                "method": "begin_pairing",
-                "params": {
+        calls: dict[str, tuple[tuple[object, ...], dict[str, object]]] = {
+            "settings": ((), {}),
+            "begin_pairing": (
+                ("d", "h", 47991, "12345678", "i"),
+                {
                     "draft_id": "d",
                     "host": "h",
                     "port": 47991,
                     "code": "12345678",
                     "identifier": "i",
                 },
-            },
-        )
-        self.assertEqual(
-            (await plugin.save_pairing("d", "n", "m"))["params"],
-            {"draft_id": "d", "name": "n", "mac": "m"},
-        )
-        self.assertEqual(
-            (await plugin.update_pc("i", {"name": "n"}))["params"],
-            {"identifier": "i", "changes": {"name": "n"}},
-        )
-        for method in ("start", "stop", "delete_pc"):
-            self.assertEqual((await getattr(plugin, method)("i"))["method"], method)
-        self.assertEqual(
-            (await plugin.set_attention(True))["params"], {"visible": True}
-        )
+            ),
+            "request_pairing_code": (("h", 47991), {"host": "h", "port": 47991}),
+            "cancel_pairing": (("d",), {"draft_id": "d"}),
+            "save_pairing": (
+                ("d", "n", "m"),
+                {"draft_id": "d", "name": "n", "mac": "m"},
+            ),
+            "detect_mac": (("h",), {"host": "h"}),
+            "update_pc": (
+                ("i", {"name": "n"}),
+                {"identifier": "i", "changes": {"name": "n"}},
+            ),
+            "delete_pc": (("i",), {"identifier": "i"}),
+            "start": (("i",), {"identifier": "i"}),
+            "stop": (("i",), {"identifier": "i"}),
+            "set_attention": ((True,), {"visible": True}),
+        }
+        for method, (arguments, params) in calls.items():
+            self.assertEqual(
+                await getattr(plugin, method)(*arguments),
+                {"method": method, "params": params},
+            )
+        # - Without an identifier the request carries none.
+        reply = await plugin.begin_pairing("d", "h", 47991, "12345678")
+        self.assertNotIn("identifier", reply["params"])
         self.assertEqual((await plugin.watch_snapshot(-1))["revision"], 1)
+        public = {
+            name
+            for name in dir(plugin)
+            if not name.startswith("_") and callable(getattr(plugin, name))
+        }
+        self.assertEqual(public, {*calls, "watch_snapshot"})
 
     @unittest.skipUnless(
         os.environ.get("MYRIG_BINARY"), "set MYRIG_BINARY to a built myrig"

@@ -1,4 +1,4 @@
-"""The harmless Rust host harness launched by the independent real-TCP tests.
+"""Harmless Rust host harness launched by the real-TCP tests.
 
 Run: python3 -m unittest discover -s tests/integration -v
 No production Python/Rust serializer, validation or authentication helper is imported.

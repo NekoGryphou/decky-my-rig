@@ -1,4 +1,4 @@
-use super::types::ServiceExit;
+use super::{types::ServiceExit, utils::check_security_folder};
 use crate::shared::consts::SERVICE_NAME;
 use crate::{
     control_pipe::ControlPipe, power::WindowsPower, program_data::program_data,
@@ -26,12 +26,13 @@ use windows_service::{
     service_dispatcher,
 };
 
+const STORAGE_RETRY: Duration = Duration::from_secs(5);
+
 static EXIT_CODE: AtomicU32 = AtomicU32::new(0);
 define_windows_service!(service_entry, service_main);
 
 pub fn run() -> Result<(), &'static str> {
-    // ! No process arguments allowed: no other config path, listener or power
-    //   mode.
+    // ! No process arguments allowed: no other config path, listener or power mode.
     if std::env::args_os().len() != 1 {
         return Err("Service arguments are unsupported.");
     }
@@ -103,11 +104,13 @@ fn service_main(arguments: Vec<OsString>) {
             .map_err(|_| ServiceExit::Config)?;
         let bytes = store.read().map_err(|_| ServiceExit::Config)?;
         let config = RegistryConfig::from_json(&bytes).map_err(|_| ServiceExit::Config)?;
-        // ! The identity lives in a separate admin-only folder, so permissions on
-        //   the registry staging can't let the service replace its TLS identity.
-        //   A missing or unsafe identity is refused before taking requests.
+        // ! The identity lives in a separate admin-only folder, so permissions on the registry
+        // ! staging can't let the service replace its TLS identity. A missing or unsafe identity is
+        // ! refused before taking requests.
         let host_id = config.host_id();
-        let identity = load_security(&directory.join("MyRigSecurity").join("Security"), host_id)
+        let security_folder = directory.join("MyRigSecurity");
+        check_security_folder(&security_folder)?;
+        let identity = load_security(&security_folder.join("Security"), host_id)
             .map_err(|_| ServiceExit::Identity)?
             .into_identity();
         let power: Box<dyn myrig_host_core::shutdown::Power> = Box::new(WindowsPower);
@@ -125,6 +128,7 @@ fn service_main(arguments: Vec<OsString>) {
             let http_stop = endpoint_stop.clone();
             let approval_identity = identity.clone();
             let (stopping_tx, stopping_rx) = watch::channel(false);
+            let retry_control = control.clone();
             let work = join_endpoints(
                 host.clone(),
                 async {
@@ -145,9 +149,21 @@ fn service_main(arguments: Vec<OsString>) {
                         .map_err(|_| ())
                 },
                 async {
-                    while !*receive.borrow_and_update() {
-                        if receive.changed().await.is_err() {
-                            break;
+                    // ? A failed read or a changed file blocks requests until the saved copy
+                    // ? matches memory again; this retries that check.
+                    let mut retry = tokio::time::interval(STORAGE_RETRY);
+                    loop {
+                        tokio::select! {
+                            changed = receive.changed() => {
+                                if changed.is_err() || *receive.borrow_and_update() {
+                                    break;
+                                }
+                            }
+                            _ = retry.tick() => {
+                                if !retry_control.host().storage_healthy() {
+                                    retry_control.restore_storage();
+                                }
+                            }
                         }
                     }
                 },

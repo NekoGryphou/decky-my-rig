@@ -37,7 +37,7 @@ impl PinVerifier {
 
     fn matches(&self, certificate: &[u8]) -> bool {
         self.pin
-            .is_none_or(|pin| bool::from(Sha256::digest(certificate).ct_eq(&pin)))
+            .is_none_or(|pin| bool::from(Sha256::digest(certificate).as_slice().ct_eq(&pin[..])))
     }
 }
 

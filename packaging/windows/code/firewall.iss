@@ -1,5 +1,5 @@
-// Returns the owned rule in Rule, or False when there is none. A rule with
-// that name for another program is never touched.
+// - Returns the owned rule in Rule, or False when there is none. A rule with
+//   that name for another program is never touched.
 function FindOwnedFirewallRule(Policy: Variant; var Rule: Variant): Boolean;
 begin
   Result := False;
@@ -14,10 +14,12 @@ begin
     RaiseException(FirewallRuleNotOwned);
 end;
 
-procedure ConfigureFirewallRule(Rule: Variant);
+// - ServicePath is the service executable the rule allows. It is a parameter so
+//   the installer's tests can apply these settings to a rule of their own.
+procedure ConfigureFirewallRule(Rule: Variant; ServicePath: String);
 begin
   Rule.Description := 'My Rig host';
-  Rule.ApplicationName := ExpandConstant('{app}\myrig-service.exe');
+  Rule.ApplicationName := ServicePath;
   Rule.Protocol := 6;
   Rule.LocalPorts := '*';
   Rule.Profiles := FirewallAllProfiles;
@@ -27,19 +29,18 @@ begin
   Rule.Enabled := True;
 end;
 
-// Updates an existing owned rule in place, so a failure never leaves the
-// service without one.
+// ? Updates an existing owned rule in place, so a failure never leaves the service without one.
 procedure EnsureFirewall;
 var
   Policy, Rule: Variant;
 begin
   Policy := CreateOleObject('HNetCfg.FwPolicy2');
   if FindOwnedFirewallRule(Policy, Rule) then
-    ConfigureFirewallRule(Rule)
+    ConfigureFirewallRule(Rule, ExpandConstant('{app}\myrig-service.exe'))
   else begin
     Rule := CreateOleObject('HNetCfg.FWRule');
     Rule.Name := FirewallRuleName;
-    ConfigureFirewallRule(Rule);
+    ConfigureFirewallRule(Rule, ExpandConstant('{app}\myrig-service.exe'));
     Policy.Rules.Add(Rule);
     FirewallCreated := True;
   end;

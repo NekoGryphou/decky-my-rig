@@ -21,4 +21,6 @@ export interface PowerAction {
 export interface StopConfirmationProps {
   pc: PcSnapshot;
   closeModal?: () => void;
+  /** Runs once the question leaves the screen, however it was answered. */
+  onDone?: () => void;
 }

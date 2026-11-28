@@ -12,8 +12,9 @@ fuzz_target!(|data: &[u8]| {
         .create_new(true)
         .mode(0o600)
         .open(fixture.file())
-        .unwrap();
-    file.write_all(data).unwrap();
+        .expect("the fixture's directory is new and empty, so pcs.json does not exist yet");
+    file.write_all(data)
+        .expect("a new file in the fixture's temporary directory accepts the input");
     drop(file);
     if let Ok(store) = fixture.open(&fixture.directory) {
         let _ = store.configs();

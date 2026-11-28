@@ -15,12 +15,12 @@
     Style="{StaticResource DefaultContentDialogStyle}">
 
     <StackPanel MinWidth="320" Spacing="8">
-        <NumberBox
+        <TextBox
             x:Name="PortBox"
             AutomationProperties.AutomationId="PortInput"
             Header="{x:Bind local:PortMessages.PortLabel, Mode=OneTime}"
-            SpinButtonPlacementMode="Hidden"
-            Value="{x:Bind ViewModel.PortInput, Mode=TwoWay}" />
+            InputScope="Number"
+            Text="{x:Bind ViewModel.PortText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
         <StackPanel
             Orientation="Horizontal"
             Spacing="8"
@@ -38,10 +38,5 @@
                 Text="{x:Bind ViewModel.Error, Mode=OneWay}"
                 TextWrapping="Wrap" />
         </StackPanel>
-        <TextBlock
-            Margin="0,8,0,0"
-            Style="{StaticResource SecondaryTextBlockStyle}"
-            Text="{x:Bind local:PortMessages.Consequence, Mode=OneTime}"
-            TextWrapping="Wrap" />
     </StackPanel>
 </ContentDialog>

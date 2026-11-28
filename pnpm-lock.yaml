@@ -115,19 +115,19 @@ importers:
       '@decky/api':
         specifier: ^1.1.3
         version: 1.1.3
+      '@decky/ui':
+        specifier: ^5.0.2
+        version: 5.0.2
       react:
-        specifier: ^19.2.0
-        version: 19.3.1
+        specifier: 19.1.1
+        version: 19.1.1
       react-dom:
-        specifier: ^19.2.0
-        version: 19.3.1(react@19.3.1)
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       react-icons:
         specifier: ^5.7.0
-        version: 5.7.0(react@19.3.1)
+        version: 5.7.0(react@19.1.1)
     devDependencies:
-      '@decky/ui':
-        specifier: ^4.11.1
-        version: 4.16.5
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.15.0(jiti@2.7.0))
@@ -136,13 +136,13 @@ importers:
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@4.1.12(jsdom@30.1.3)(vite@8.3.8(jiti@2.7.0)(yaml@2.9.1)))
       '@testing-library/react':
         specifier: ^16.3.3
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.1.11(@types/react@19.1.17))(@types/react@19.1.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@types/react':
-        specifier: ^19.2.0
-        version: 19.3.0
+        specifier: ~19.1.17
+        version: 19.1.17
       '@types/react-dom':
-        specifier: ^19.2.5
-        version: 19.3.0(@types/react@19.3.0)
+        specifier: ~19.1.11
+        version: 19.1.11(@types/react@19.1.17)
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.3.0(vite@8.3.8(jiti@2.7.0)(yaml@2.9.1))
@@ -310,8 +310,8 @@ packages:
   '@decky/api@1.1.3':
     resolution: {integrity: sha512-XsPCZxfxk5I1UtylIUN3qaWQI31siQbKfbLIskkI5innEatY1m4NQqBv/6hwPaO9mKMbdqYpnh5PSJDeMEOOBA==}
 
-  '@decky/ui@4.16.5':
-    resolution: {integrity: sha512-3vefJUGf5eXW27H+TyU2seWQzJZB/I3/PJUNG6LfwNdvbjv6jCSAXkK+4A3ICT4c2BWjCVe+tZZf7JUq+ZDcfw==}
+  '@decky/ui@5.0.2':
+    resolution: {integrity: sha512-YQaOYUCgdgg1YRKRW/FDf47VKjcbhaetFQMPqyvRF8L0JSwXJDQ+RNAhTQ0v7+Tf9PlgDj5d22YesgSE4Yu7IQ==}
 
   '@emnapi/core@1.11.2':
     resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
@@ -829,13 +829,13 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
-  '@types/react-dom@19.3.0':
-    resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
+  '@types/react-dom@19.1.11':
+    resolution: {integrity: sha512-3BKc/yGdNTYQVVw4idqHtSOcFsgGuBbMveKCOgF8wQ5QtrYOc3jDIlzg3jef04zcXFIHLelyGlj0T+BJ8+KN+w==}
     peerDependencies:
-      '@types/react': ^19.3.0
+      '@types/react': ^19.0.0
 
-  '@types/react@19.3.0':
-    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+  '@types/react@19.1.17':
+    resolution: {integrity: sha512-Qec1E3mhALmaspIrhWt9jkQMNdw6bReVu64mjvhbhq2NFPftLPVr+l1SZgmw/66WwBNpDh7ao5AT6gF5v41PFA==}
 
   '@typescript-eslint/eslint-plugin@8.73.0':
     resolution: {integrity: sha512-UkygMFer53Yzn29MCYFTHf34hGXf5KJhiDWfIm1tXtXRrym1CS6l5H9Y3yCtPWChpC0/f93H88gdj8tN0dd4kw==}
@@ -1519,10 +1519,10 @@ packages:
     resolution: {integrity: sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA==}
     engines: {node: '>=20'}
 
-  react-dom@19.3.1:
-    resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
+  react-dom@19.1.1:
+    resolution: {integrity: sha512-Dlq/5LAZgF0Gaz6yiqZCf6VCcZs1ghAJyrsu84Q/GT0gV+mCxbfmKNoGRKBYMJ8IEdGPqu49YWXD02GCknEDkw==}
     peerDependencies:
-      react: ^19.3.1
+      react: ^19.1.1
 
   react-icons@5.7.0:
     resolution: {integrity: sha512-LBLy340Rzqy6+/yVhZKT3B/QpP1BZaesGqasf09HPOBzRarcDIFH0WwXlXQfE7q7ipxK4MSiC5DIBWURCny6fw==}
@@ -1532,8 +1532,8 @@ packages:
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
 
-  react@19.3.1:
-    resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
+  react@19.1.1:
+    resolution: {integrity: sha512-w8nqGImo45dmMIfljjMwOGtbmC/mk4CMYhWIicdSflH91J9TyCyczcPFXJzrZ/ZXcgGRFeP6BU0BEJTw6tZdfQ==}
     engines: {node: '>=0.10.0'}
 
   redent@3.0.0:
@@ -1556,8 +1556,8 @@ packages:
     resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==}
     engines: {node: '>=v12.22.7'}
 
-  scheduler@0.28.0:
-    resolution: {integrity: sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==}
+  scheduler@0.26.0:
+    resolution: {integrity: sha512-NlHwttCI/l5gCPR3D1nNXtWABUmBwvZpEQiD4IXSbIDq8BzLIK/7Ir5gTFSGZDUu37K5cMNp0hFtzO38sC7gWA==}
 
   semver@6.3.2:
     resolution: {integrity: sha512-GYrCADwpu6yV5OAvchkQ27Z5wwMxWAEMg5NNWjyHh/5DboFFqbdbvYNIvZouQpxXyeMPoTOh0vdPYKlf0ZswdQ==}
@@ -1982,7 +1982,7 @@ snapshots:
 
   '@decky/api@1.1.3': {}
 
-  '@decky/ui@4.16.5': {}
+  '@decky/ui@5.0.2': {}
 
   '@emnapi/core@1.11.2':
     dependencies:
@@ -2312,15 +2312,15 @@ snapshots:
     optionalDependencies:
       vitest: 4.1.12(jsdom@30.1.3)(vite@8.3.8(jiti@2.7.0)(yaml@2.9.1))
 
-  '@testing-library/react@16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@testing-library/react@16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.1.11(@types/react@19.1.17))(@types/react@19.1.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
     dependencies:
       '@babel/runtime': 7.29.15
       '@testing-library/dom': 10.4.2
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
+      react: 19.1.1
+      react-dom: 19.1.1(react@19.1.1)
     optionalDependencies:
-      '@types/react': 19.3.0
-      '@types/react-dom': 19.3.0(@types/react@19.3.0)
+      '@types/react': 19.1.17
+      '@types/react-dom': 19.1.11(@types/react@19.1.17)
 
   '@tybys/wasm-util@0.10.5':
     dependencies:
@@ -2342,11 +2342,11 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
-  '@types/react-dom@19.3.0(@types/react@19.3.0)':
+  '@types/react-dom@19.1.11(@types/react@19.1.17)':
     dependencies:
-      '@types/react': 19.3.0
+      '@types/react': 19.1.17
 
-  '@types/react@19.3.0':
+  '@types/react@19.1.17':
     dependencies:
       csstype: 3.2.4
 
@@ -3049,18 +3049,18 @@ snapshots:
     dependencies:
       hookified: 2.2.0
 
-  react-dom@19.3.1(react@19.3.1):
+  react-dom@19.1.1(react@19.1.1):
     dependencies:
-      react: 19.3.1
-      scheduler: 0.28.0
+      react: 19.1.1
+      scheduler: 0.26.0
 
-  react-icons@5.7.0(react@19.3.1):
+  react-icons@5.7.0(react@19.1.1):
     dependencies:
-      react: 19.3.1
+      react: 19.1.1
 
   react-is@17.0.2: {}
 
-  react@19.3.1: {}
+  react@19.1.1: {}
 
   redent@3.0.0:
     dependencies:
@@ -3097,7 +3097,7 @@ snapshots:
     dependencies:
       xmlchars: 2.2.0
 
-  scheduler@0.28.0: {}
+  scheduler@0.26.0: {}
 
   semver@6.3.2: {}
 

@@ -17,7 +17,7 @@ internal static class HostHelpers
         ServiceState.Unavailable => new(HostMessages.UnavailableTitle, "", MessageTone.Error),
         ServiceState.Running when controlUnauthorized => new(HostMessages.SignOutTitle, "", MessageTone.Warning),
         ServiceState.Running when controlUnavailable => new(HostMessages.ControlTitle, "", MessageTone.Error),
-        _ when testModeOn => new(HostMessages.TestModeTitle, HostMessages.TestModeMessage, MessageTone.Informational),
+        _ when testModeOn => new(HostMessages.TestModeTitle, "", MessageTone.Informational),
         _ => null,
     };
 }
